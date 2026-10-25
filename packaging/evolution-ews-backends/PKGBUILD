@@ -1,0 +1,47 @@
+# evolution-ews without the Evolution mail client: the Microsoft 365 and
+# Exchange backends for evolution-data-server (calendars, task lists, address
+# books, mail), as used by GNOME Calendar, Nixe Calendar, Reminders and Contacts.
+# Rebuild for every evolution-data-server minor release (3.62 → 3.64).
+
+pkgname=evolution-ews-backends
+_pkgname=evolution-ews
+pkgver=3.62.1
+pkgrel=1
+# The evolution-data-server series these modules are built for.
+_eds=3.62
+_eds_next=3.63
+pkgdesc="Microsoft 365 and Exchange backends for evolution-data-server, without Evolution"
+arch=(x86_64)
+url="https://gitlab.gnome.org/GNOME/evolution-ews"
+license=(LGPL-2.1-or-later)
+depends=(
+  "evolution-data-server>=$_eds"
+  "evolution-data-server<$_eds_next"
+  glib2
+  glibc
+  json-glib
+  libgcc
+  libical
+  libmspack
+  libsoup3
+  libxml2
+)
+makedepends=(cmake glib2-devel intltool ninja)
+provides=("$_pkgname=$pkgver")
+conflicts=("$_pkgname")
+source=("https://download.gnome.org/sources/$_pkgname/${pkgver%.*}/$_pkgname-$pkgver.tar.xz")
+sha256sums=('4b525480387b094c30122e33d3bed83c0d849d3b94dc7a8655945a79f703853d')
+
+build() {
+  cmake -S "$_pkgname-$pkgver" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLIBEXEC_INSTALL_DIR=/usr/lib \
+    -DSYSCONF_INSTALL_DIR=/etc \
+    -DWITH_EVOLUTION=OFF
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
