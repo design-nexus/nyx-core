@@ -115,6 +115,42 @@ impl Registry {
         out
     }
 
+    /// Every source of a kind with whether it's switched on itself, for turning
+    /// sources on and off. Sources off only because their account's service is
+    /// off in Settings are left out (switching them on here wouldn't show them).
+    pub fn all_sources(&self, kind: Kind) -> Vec<(Source, bool)> {
+        let ext = kind.extension();
+        let list = unsafe { eds::e_source_registry_list_sources(self.raw(), ext.as_ptr().cast()) };
+        let mut out = Vec::new();
+        let mut node = list;
+        while !node.is_null() {
+            let source = unsafe { (*node).data.cast::<eds::ESource>() };
+            let own = unsafe { eds::e_source_get_enabled(source) } != 0;
+            let shown = unsafe { eds::e_source_registry_check_enabled(self.raw(), source) } != 0;
+            if shown || !own {
+                out.push((unsafe { self.describe(source, kind) }, own));
+            }
+            unsafe {
+                gobject_sys::g_object_unref(source.cast());
+                node = (*node).next;
+            }
+        }
+        unsafe { glib_sys::g_list_free(list) };
+        out.sort_by(|(a, _), (b, _)| (a.local, &a.group, &a.name).cmp(&(b.local, &b.group, &b.name)));
+        out
+    }
+
+    /// Switches a source on or off for every app (off: not loaded or synced).
+    pub fn set_enabled(&self, uid: &str, enabled: bool) -> Result<(), Error> {
+        let source = self.ref_source(uid).ok_or_else(|| Error::NotFound("That calendar no longer exists.".into()))?;
+        unsafe { eds::e_source_set_enabled(source.ptr(), enabled.into()) };
+        let mut err = std::ptr::null_mut();
+        if unsafe { eds::e_source_write_sync(source.ptr(), std::ptr::null_mut(), &mut err) } == 0 {
+            return Err(unsafe { take_error(err) });
+        }
+        Ok(())
+    }
+
     /// One source by uid, if it exists and has that kind.
     pub fn source(&self, uid: &str, kind: Kind) -> Option<Source> {
         let source = self.ref_source(uid)?;
