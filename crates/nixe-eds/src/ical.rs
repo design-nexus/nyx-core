@@ -382,6 +382,42 @@ fn address(value: Option<String>) -> String {
     }
 }
 
+/// Whose busy times a VFREEBUSY holds (its ATTENDEE, else ORGANIZER, without
+/// `mailto:`) and those times, as (start, end) Unix seconds. Free periods are left out.
+///
+/// # Safety
+/// `comp` must be a valid VFREEBUSY component.
+pub(crate) unsafe fn busy_periods(comp: *mut ical::ICalComponent) -> (String, Vec<(i64, i64)>) {
+    let mut busy = Vec::new();
+    unsafe {
+        let who = property_text(comp, ical::I_CAL_ATTENDEE_PROPERTY).or_else(|| property_text(comp, ical::I_CAL_ORGANIZER_PROPERTY));
+        let utc = ical::i_cal_timezone_get_utc_timezone();
+        let mut next = Owned::new(ical::i_cal_component_get_first_property(comp, ical::I_CAL_FREEBUSY_PROPERTY));
+        while let Some(prop) = next {
+            let free = Owned::new(ical::i_cal_property_get_first_parameter(prop.ptr(), ical::I_CAL_FBTYPE_PARAMETER))
+                .is_some_and(|p| ical::i_cal_parameter_get_fbtype(p.ptr()) == ical::I_CAL_FBTYPE_FREE);
+            if !free && let Some(period) = Owned::new(ical::i_cal_property_get_freebusy(prop.ptr())) {
+                let start = Owned::new(ical::i_cal_period_get_start(period.ptr()));
+                let end = Owned::new(ical::i_cal_period_get_end(period.ptr()));
+                if let Some(start) = start.filter(|s| ical::i_cal_time_is_null_time(s.ptr()) == 0) {
+                    let from = ical::i_cal_time_as_timet_with_zone(start.ptr(), utc) as i64;
+                    let to = match end.filter(|e| ical::i_cal_time_is_null_time(e.ptr()) == 0) {
+                        Some(end) => ical::i_cal_time_as_timet_with_zone(end.ptr(), utc) as i64,
+                        None => Owned::new(ical::i_cal_period_get_duration(period.ptr()))
+                            .map(|d| from + ical::i_cal_duration_as_seconds(d.ptr()) as i64)
+                            .unwrap_or(from),
+                    };
+                    if to > from {
+                        busy.push((from, to));
+                    }
+                }
+            }
+            next = Owned::new(ical::i_cal_component_get_next_property(comp, ical::I_CAL_FREEBUSY_PROPERTY));
+        }
+        (address(who), busy)
+    }
+}
+
 unsafe fn attendee(prop: *mut ical::ICalProperty, organizer: bool) -> Attendee {
     unsafe {
         let email = address(borrowed(if organizer {
@@ -719,6 +755,21 @@ pub(crate) fn now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_busy_periods() {
+        let c = cstring(
+            "BEGIN:VFREEBUSY\r\nATTENDEE:mailto:sam@example.com\r\n\
+             FREEBUSY:20261030T090000Z/20261030T100000Z,20261030T130000Z/PT30M\r\n\
+             FREEBUSY;FBTYPE=FREE:20261030T150000Z/20261030T160000Z\r\n\
+             FREEBUSY;FBTYPE=BUSY-TENTATIVE:20261031T090000Z/20261031T091500Z\r\nEND:VFREEBUSY\r\n",
+        );
+        let comp = unsafe { Owned::new(ical::i_cal_component_new_from_string(c.as_ptr())) }.unwrap();
+        let (who, busy) = unsafe { busy_periods(comp.ptr()) };
+        assert_eq!(who, "sam@example.com");
+        let nine = 1_793_350_800; // 2026-10-30 09:00 UTC
+        assert_eq!(busy, [(nine, nine + 3600), (nine + 4 * 3600, nine + 4 * 3600 + 1800), (nine + 86_400, nine + 86_400 + 900)]);
+    }
 
     fn read(ics: &str) -> Item {
         let c = cstring(ics);

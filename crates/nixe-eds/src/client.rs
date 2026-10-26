@@ -26,6 +26,9 @@ impl Scope {
     }
 }
 
+/// A person's busy times: their address and (start, end) Unix seconds.
+pub type Busy = (String, Vec<(i64, i64)>);
+
 /// An open calendar or task list. Not `Send`: see the crate docs.
 pub struct Calendar {
     obj: glib::Object,
@@ -530,6 +533,49 @@ impl Calendar {
             }
             Ok(owned(icalsys::i_cal_component_as_ical_string(calendar.ptr())).unwrap_or_default())
         }
+    }
+
+    /// The busy times of `people` (email addresses) from `from` to `to` (Unix
+    /// seconds), as this calendar's server knows them (Exchange and Microsoft 365,
+    /// CalDAV servers with scheduling). Each person found, with (start, end) times.
+    pub fn free_busy(&self, from: i64, to: i64, people: &[String]) -> Result<Vec<Busy>, Error> {
+        let names: Vec<std::ffi::CString> = people.iter().map(|p| cstring(p)).collect();
+        let mut out: Vec<Busy> = Vec::new();
+        unsafe {
+            let mut users: *mut glib_sys::GSList = std::ptr::null_mut();
+            for name in &names {
+                users = glib_sys::g_slist_append(users, name.as_ptr() as glib_sys::gpointer);
+            }
+            let mut list = std::ptr::null_mut();
+            let mut err = std::ptr::null_mut();
+            let ok = ecal::e_cal_client_get_free_busy_sync(
+                self.raw(),
+                from as _,
+                to as _,
+                users,
+                &mut list,
+                std::ptr::null_mut(),
+                &mut err,
+            );
+            glib_sys::g_slist_free(users);
+            if ok == 0 {
+                return Err(take_error(err));
+            }
+            let mut node = list;
+            while !node.is_null() {
+                let comp = ecal::e_cal_component_get_icalcomponent((*node).data.cast());
+                if !comp.is_null() {
+                    let (who, busy) = ical::busy_periods(comp);
+                    match out.iter_mut().find(|(w, _)| w.eq_ignore_ascii_case(&who)) {
+                        Some((_, times)) => times.extend(busy),
+                        None => out.push((who, busy)),
+                    }
+                }
+                node = (*node).next;
+            }
+            edata_server_sys::e_client_util_free_object_slist(list);
+        }
+        Ok(out)
     }
 
     fn add_zone(&self, zone: *mut icalsys::ICalTimezone) -> Result<(), Error> {

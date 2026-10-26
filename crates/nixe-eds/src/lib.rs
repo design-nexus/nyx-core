@@ -20,7 +20,7 @@ mod ical;
 mod registry;
 mod reminders;
 
-pub use client::{Calendar, Scope, View, range_query};
+pub use client::{Busy, Calendar, Scope, View, range_query};
 pub use ical::{Attendee, Draft, Item, ItemKind, Response, Status, When, local_zone};
 pub use registry::{Kind, Registry, Source, Watch};
 pub use reminders::{Reminder, Reminders};
