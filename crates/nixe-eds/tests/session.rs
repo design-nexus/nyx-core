@@ -366,3 +366,20 @@ fn completing_a_repeating_task_moves_it_on() {
     list.remove(&once, None, Scope::All).unwrap();
     list.remove(&weekly, None, Scope::All).unwrap();
 }
+
+#[test]
+#[ignore]
+fn tags_and_free_busy() {
+    let registry = registry();
+    let tasks = Calendar::open(&registry, LOCAL_TASKS, Kind::TaskList, None).unwrap();
+    let uid = tasks.create(&Draft { summary: Some("Tagged".into()), categories: Some(vec!["home".into(), "bills".into()]), ..Draft::default() }).unwrap();
+    assert_eq!(tasks.get(&uid, None).unwrap().categories, ["home", "bills"]);
+    tasks.modify(&uid, None, Scope::All, &Draft { categories: Some(Vec::new()), ..Draft::default() }).unwrap();
+    assert!(tasks.get(&uid, None).unwrap().categories.is_empty());
+    tasks.remove(&uid, None, Scope::All).unwrap();
+
+    // The local calendar answers for its own mail accounts only (none here).
+    let cal = Calendar::open(&registry, LOCAL_CALENDAR, Kind::Calendar, None).unwrap();
+    let busy = cal.free_busy(OCT_26_1000_EDT, OCT_26_1000_EDT + DAY, &["sam@example.com".to_string()]);
+    assert!(busy.is_ok(), "{busy:?}");
+}
