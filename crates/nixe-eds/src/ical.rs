@@ -125,6 +125,8 @@ pub struct Item {
     pub completed: Option<When>,
     pub priority: Option<u8>,
     pub url: Option<String>,
+    /// Tags (CATEGORIES), in order, without repeats.
+    pub categories: Vec<String>,
     /// The parent task, for subtasks.
     pub parent: Option<String>,
     pub repeats: bool,
@@ -170,6 +172,8 @@ pub struct Draft {
     pub done: Option<bool>,
     pub priority: Option<Option<u8>>,
     pub url: Option<Option<String>>,
+    /// Replaces every tag (CATEGORIES); empty removes them.
+    pub categories: Option<Vec<String>>,
     pub parent: Option<Option<String>>,
     /// Replaces every alert; see [`Item::alarms`].
     pub alarms: Option<Vec<i64>>,
@@ -358,6 +362,7 @@ pub(crate) unsafe fn item(
             completed,
             priority,
             url: property_text(comp, ical::I_CAL_URL_PROPERTY),
+            categories: categories(comp),
             parent: property_text(comp, ical::I_CAL_RELATEDTO_PROPERTY),
             repeats,
             rule: property_text(comp, ical::I_CAL_RRULE_PROPERTY),
@@ -398,6 +403,24 @@ unsafe fn attendee(prop: *mut ical::ICalProperty, organizer: bool) -> Attendee {
             optional: role == Some(ical::I_CAL_ROLE_OPTPARTICIPANT) || role == Some(ical::I_CAL_ROLE_NONPARTICIPANT),
         }
     }
+}
+
+/// Every CATEGORIES value; one property may list several, comma-separated.
+unsafe fn categories(comp: *mut ical::ICalComponent) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    unsafe {
+        let mut next = Owned::new(ical::i_cal_component_get_first_property(comp, ical::I_CAL_CATEGORIES_PROPERTY));
+        while let Some(prop) = next {
+            for tag in borrowed(ical::i_cal_property_get_categories(prop.ptr())).unwrap_or_default().split(',') {
+                let tag = tag.trim();
+                if !tag.is_empty() && !out.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                    out.push(tag.to_string());
+                }
+            }
+            next = Owned::new(ical::i_cal_component_get_next_property(comp, ical::I_CAL_CATEGORIES_PROPERTY));
+        }
+    }
+    out
 }
 
 unsafe fn attendees(comp: *mut ical::ICalComponent) -> Vec<Attendee> {
@@ -605,6 +628,13 @@ pub(crate) unsafe fn apply(comp: *mut ical::ICalComponent, draft: &Draft) -> *mu
                 add(comp, ical::i_cal_property_new_url(cstring(url).as_ptr()));
             }
         }
+        if let Some(tags) = &draft.categories {
+            remove_all(comp, ical::I_CAL_CATEGORIES_PROPERTY);
+            // One property per tag, so a tag never needs its commas escaped.
+            for tag in tags.iter().map(|t| t.replace(',', " ")).filter(|t| !t.trim().is_empty()) {
+                add(comp, ical::i_cal_property_new_categories(cstring(tag.trim()).as_ptr()));
+            }
+        }
         if let Some(minutes) = &draft.alarms {
             set_alarms(comp, minutes);
         }
@@ -723,7 +753,7 @@ mod tests {
     fn reads_a_task() {
         let item = read(
             "BEGIN:VTODO\r\nUID:t\r\nSUMMARY:Call Sam\r\nDUE;VALUE=DATE:20261030\r\nPRIORITY:1\r\n\
-             STATUS:COMPLETED\r\nCOMPLETED:20261021T120000Z\r\nRELATED-TO:parent\r\nURL:https://example.com\r\nEND:VTODO\r\n",
+             STATUS:COMPLETED\r\nCOMPLETED:20261021T120000Z\r\nRELATED-TO:parent\r\nURL:https://example.com\r\nCATEGORIES:Work,errands\r\nCATEGORIES:work\r\nEND:VTODO\r\n",
         );
         assert_eq!(item.kind, ItemKind::Task);
         assert_eq!(item.due, Some(When::Date { year: 2026, month: 10, day: 30 }));
@@ -731,6 +761,7 @@ mod tests {
         assert!(item.is_done());
         assert_eq!(item.parent.as_deref(), Some("parent"));
         assert_eq!(item.url.as_deref(), Some("https://example.com"));
+        assert_eq!(item.categories, ["Work", "errands"]);
     }
 
     #[test]
@@ -742,6 +773,7 @@ mod tests {
             repeat: Some(Some("FREQ=MONTHLY".into())),
             priority: Some(Some(5)),
             url: Some(Some("https://bank.example".into())),
+            categories: Some(vec!["Home".into(), "Bills".into()]),
             parent: Some(Some("p1".into())),
             ..Draft::default()
         };
@@ -755,11 +787,13 @@ mod tests {
             assert_eq!(item.rule.as_deref(), Some("FREQ=MONTHLY"));
             assert_eq!(item.priority, Some(5));
             assert_eq!(item.parent.as_deref(), Some("p1"));
+            assert_eq!(item.categories, ["Home", "Bills"]);
 
-            apply(comp.ptr(), &Draft { done: Some(true), url: Some(None), repeat: Some(None), ..Draft::default() });
+            apply(comp.ptr(), &Draft { done: Some(true), url: Some(None), repeat: Some(None), categories: Some(Vec::new()), ..Draft::default() });
             let item = super::item(comp.ptr(), None, &Zones::fixed(zone("UTC")));
             assert!(item.is_done());
             assert_eq!(item.url, None);
+            assert!(item.categories.is_empty());
             assert!(!item.repeats);
         }
     }
