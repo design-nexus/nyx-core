@@ -1,4 +1,4 @@
-//! The two libcamel types libedataserver mentions (`e_source_camel_*`). Nixe does
+//! The two libcamel types libedataserver mentions (`e_source_camel_*`). Nyx does
 //! not use Camel, and these are only passed by pointer, so they are opaque here.
 //! The installed Camel GIR also has entries gir cannot turn into working code.
 

@@ -1,29 +1,29 @@
 # Architecture
 
-Nixe Online Accounts is a thin client of services that already exist on the session bus.
+Nyx Online Accounts is a thin client of services that already exist on the session bus.
 
 ## Principle
 
-Reuse GOA for identity and authentication, EDS for PIM sync, and provider libraries (rclone, `nixe-sync`) only where GOA/EDS do not cover the job. Do not invent a second account database.
+Reuse GOA for identity and authentication, EDS for PIM sync, and provider libraries (rclone, `nyx-sync`) only where GOA/EDS do not cover the job. Do not invent a second account database.
 
 ## Context
 
 ```mermaid
 flowchart TB
-  subgraph nixe [Nixe apps]
-    Settings[Nixe Settings]
-    Contacts[Nixe Contacts]
+  subgraph nyx [Nyx apps]
+    Settings[Nyx Settings]
+    Contacts[Nyx Contacts]
     Later[Mail / Calendar / Reminders / Drive / Notes]
   end
 
-  Lib[crates/nixe-accounts]
+  Lib[crates/nyx-accounts]
 
   Settings --> Lib
   Contacts --> Lib
   Later --> Lib
 
   Lib -->|list / toggle / remove / status| GOA[goa-daemon]
-  Settings -->|Add / reauth| Helper[nixe-goa-helper]
+  Settings -->|Add / reauth| Helper[nyx-goa-helper]
   Helper -->|libgoa-backend OAuth| GOA
   GOA --> Keyring[gnome-keyring Secret Service]
   GOA --> EDS[evolution-source-registry]
@@ -32,9 +32,9 @@ flowchart TB
   GOA --> Gvfs[gvfs-goa / google / onedrive]
 ```
 
-## Why there is no `nixe-accountsd`
+## Why there is no `nyx-accountsd`
 
-`MAIL_PLAN.md` Phase 0 argued for a Nixe daemon so Settings and Mail would not race on SQLite and would not copy refresh tokens. GOA already:
+`MAIL_PLAN.md` Phase 0 argued for a Nyx daemon so Settings and Mail would not race on SQLite and would not copy refresh tokens. GOA already:
 
 - Owns `~/.config/goa-1.0/accounts.conf` (no access/refresh tokens; Microsoft may store GNOME OAuth2 URIs and client id)
 - Stores tokens in Secret Service
@@ -44,11 +44,11 @@ flowchart TB
 
 A second daemon would duplicate that, split identity from EDS, and still need GOA for Google/Microsoft OAuth client IDs.
 
-Passwords’ `nixe-passwordsd` remains the pattern for **Nixe-owned** secrets (Vaultwarden). Online accounts are not Nixe-owned.
+Passwords’ `nyx-passwordsd` remains the pattern for **Nyx-owned** secrets (Vaultwarden). Online accounts are not Nyx-owned.
 
 ## Crate
 
-`crates/nixe-accounts` (workspace member, no GTK):
+`crates/nyx-accounts` (workspace member, no GTK):
 
 | API | Role |
 | --- | --- |
@@ -62,7 +62,7 @@ Passwords’ `nixe-passwordsd` remains the pattern for **Nixe-owned** secrets (V
 | `subscribe(Change)` | GOA signals |
 | `open_management()` | Launch `gnome-online-accounts-gtk` |
 
-Tokens never appear on a Nixe bus name. Apps that need an access token (Mail's `nixe-maild`, or a later Drive adapter) call GOA’s OAuth2 interface in-process, or let EDS do it.
+Tokens never appear on a Nyx bus name. Apps that need an access token (Mail's `nyx-maild`, or a later Drive adapter) call GOA’s OAuth2 interface in-process, or let EDS do it.
 
 Binding: **gio 0.22 D-Bus** (GTK main loop). Not crates.io `goa` 0.0.3, not zbus/tokio, not `libgoa-backend` from Settings.
 
@@ -97,12 +97,12 @@ Provider-specific extra settings that only exist in `libgoa-backend` (`show_acco
 
 Two GOA surfaces exist. They are not interchangeable. See [GOA_RESEARCH.md](GOA_RESEARCH.md).
 
-**Chosen path:** Nixe-native list/detail **and** provider picker. Add/reauth spawn `nixe-goa-helper`, which links `libgoa-backend` in a separate process (browser OAuth, GNOME client IDs). Settings does not link libadwaita. `gnome-online-accounts-gtk` remains a fallback if the helper is missing.
+**Chosen path:** Nyx-native list/detail **and** provider picker. Add/reauth spawn `nyx-goa-helper`, which links `libgoa-backend` in a separate process (browser OAuth, GNOME client IDs). Settings does not link libadwaita. `gnome-online-accounts-gtk` remains a fallback if the helper is missing.
 
 ```mermaid
 sequenceDiagram
   actor User
-  participant Settings as Nixe Settings
+  participant Settings as Nyx Settings
   participant Helper as gnome-online-accounts-gtk
   participant Backend as libgoa-backend
   participant Browser as Default browser
@@ -122,13 +122,13 @@ sequenceDiagram
 
 Rejected for Phase 1–2:
 
-1. Embed `GoaProvider` in Settings — pulls libadwaita widgets into a Nixe window.
-2. Custom OAuth + `Manager.AddAccount` — copies GNOME client IDs or needs Nixe app registrations; high maintenance.
+1. Embed `GoaProvider` in Settings — pulls libadwaita widgets into a Nyx window.
+2. Custom OAuth + `Manager.AddAccount` — copies GNOME client IDs or needs Nyx app registrations; high maintenance.
 3. `gnome-control-center` — depends on `gnome-shell`.
 
 ## EDS
 
-GOA does not sync PIM data. `evolution-source-registry` watches GOA and creates collection `ESource`s (`ESourceGoa`). Children are mail identities (unused by Nixe), CardDAV books, CalDAV calendars, VTODO lists.
+GOA does not sync PIM data. `evolution-source-registry` watches GOA and creates collection `ESource`s (`ESourceGoa`). Children are mail identities (unused by Nyx), CardDAV books, CalDAV calendars, VTODO lists.
 
 Settings does not require EDS. Contacts/Calendar/Reminders/Mail do, when those apps want provider sync. See [EDS_INTEGRATION.md](EDS_INTEGRATION.md).
 
@@ -139,9 +139,9 @@ Settings does not require EDS. Contacts/Calendar/Reminders/Mail do, when those a
 | Contacts | GOA identity; EDS books as extra sources | EDS CardDAV |
 | Calendar | GOA identity; EDS calendars | EDS CalDAV |
 | Reminders | EDS tasks / VTODO; extra local metadata allowed | EDS |
-| Mail | GOA identity, `Mail` settings and in-process credentials | `nixe-maild` IMAP/SMTP |
+| Mail | GOA identity, `Mail` settings and in-process credentials | `nyx-maild` IMAP/SMTP |
 | Drive | GOA Files if the interface exists; rclone stays for the rest | GVFS or rclone, not both on one token |
-| Notes | Local Markdown; optional `nixe-sync` WebDAV | Not GOA |
+| Notes | Local Markdown; optional `nyx-sync` WebDAV | Not GOA |
 
 ## Files on disk
 
@@ -150,8 +150,8 @@ Settings does not require EDS. Contacts/Calendar/Reminders/Mail do, when those a
 | `~/.config/goa-1.0/accounts.conf` | goa-daemon | no |
 | gnome-keyring items (private schema) | goa-daemon | yes |
 | `~/.config/evolution/sources/` | EDS | no |
-| `~/.local/share/nixe-contacts/contacts.db` | Nixe Contacts | no (local) |
-| Nixe `settings.toml` | Nixe | never tokens |
+| `~/.local/share/nyx-contacts/contacts.db` | Nyx Contacts | no (local) |
+| Nyx `settings.toml` | Nyx | never tokens |
 
 ## Omarchy session
 

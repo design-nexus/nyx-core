@@ -12,9 +12,9 @@ source=dist/(name+'-'+a.tag+'-source.tar.gz')
 raw=subprocess.check_output(['git','archive','--format=tar','HEAD'],cwd=ROOT)
 with source.open('wb') as out,gzip.GzipFile(filename='',fileobj=out,mode='wb',mtime=0) as stream:stream.write(raw)
 assets=[source]
-if name=='nixe-design':
- run('python3','tools/package-assets.py');assets.append(dist/('nixe-design-'+revision+'.tar.gz'))
-notes=dist/'CHANGELOG.md';notes.write_text('# '+name+' '+a.tag+'\n\nVersioned shared workspace for the Nixe standalone suite.\nCanonical APIs and assets retain their existing behavior. Consumer export revisions\nare pinned separately in the umbrella suite manifest and have identical Rust source.\n\nSource commit: '+revision+'\n')
+if name=='nyx-design':
+ run('python3','tools/package-assets.py');assets.append(dist/('nyx-design-'+revision+'.tar.gz'))
+notes=dist/'CHANGELOG.md';notes.write_text('# '+name+' '+a.tag+'\n\nVersioned shared workspace for the Nyx standalone suite.\nCanonical APIs and assets retain their existing behavior. Consumer export revisions\nare pinned separately in the umbrella suite manifest and have identical Rust source.\n\nSource commit: '+revision+'\n')
 assets.append(notes)
 checksums=dist/'SHA256SUMS';checksums.write_text(''.join(hashlib.sha256(x.read_bytes()).hexdigest()+'  '+x.name+'\n' for x in assets));assets.append(checksums)
 if a.publish:run('gh','release','create',a.tag,*map(str,assets),'--repo','design-nexus/'+name,'--target',revision,'--title',name+' '+a.tag,'--notes-file',str(notes))

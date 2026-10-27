@@ -2,7 +2,7 @@
 introspectable="0" and give untyped <type> elements a stand-in.
 
 Those entries (private helpers such as camel_search_build_match_regex) carry
-types gir cannot parse, and nothing in Nixe calls them.
+types gir cannot parse, and nothing in Nyx calls them.
 """
 import re
 import subprocess

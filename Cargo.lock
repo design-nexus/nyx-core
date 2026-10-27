@@ -1317,129 +1317,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nixe-accounts"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "gio",
- "glib",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "nixe-camel-sys"
-version = "0.1.0"
-
-[[package]]
-name = "nixe-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "gtk4",
- "serde",
- "serde_json",
- "toml 1.1.6+spec-1.1.0",
-]
-
-[[package]]
-name = "nixe-ecal-sys"
-version = "0.1.0"
-dependencies = [
- "gio-sys",
- "glib-sys",
- "gobject-sys",
- "libc",
- "nixe-camel-sys",
- "nixe-edataserver-sys",
- "nixe-icalglib-sys",
- "shell-words",
- "system-deps 9.0.0",
- "tempfile",
-]
-
-[[package]]
-name = "nixe-edataserver-sys"
-version = "0.1.0"
-dependencies = [
- "gio-sys",
- "glib-sys",
- "gobject-sys",
- "libc",
- "nixe-camel-sys",
- "nixe-json-glib-sys",
- "nixe-libxml2-sys",
- "shell-words",
- "soup3-sys",
- "system-deps 9.0.0",
- "tempfile",
-]
-
-[[package]]
-name = "nixe-eds"
-version = "0.1.0"
-dependencies = [
- "gio-sys",
- "glib",
- "glib-sys",
- "gobject-sys",
- "libc",
- "nixe-ecal-sys",
- "nixe-edataserver-sys",
- "nixe-icalglib-sys",
-]
-
-[[package]]
-name = "nixe-icalglib-sys"
-version = "0.1.0"
-dependencies = [
- "gio-sys",
- "glib-sys",
- "gobject-sys",
- "libc",
- "shell-words",
- "system-deps 9.0.0",
- "tempfile",
-]
-
-[[package]]
-name = "nixe-json-glib-sys"
-version = "0.1.0"
-dependencies = [
- "gio-sys",
- "glib-sys",
- "gobject-sys",
- "libc",
- "shell-words",
- "system-deps 9.0.0",
- "tempfile",
-]
-
-[[package]]
-name = "nixe-libxml2-sys"
-version = "0.1.0"
-
-[[package]]
-name = "nixe-sync"
-version = "0.1.0"
-dependencies = [
- "age",
- "anyhow",
- "reqwest",
- "serde",
- "serde_json",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "nixe-when"
-version = "0.1.0"
-dependencies = [
- "chrono",
-]
-
-[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1456,6 +1333,129 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "nyx-accounts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gio",
+ "glib",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nyx-camel-sys"
+version = "0.1.0"
+
+[[package]]
+name = "nyx-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gtk4",
+ "serde",
+ "serde_json",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
+name = "nyx-ecal-sys"
+version = "0.1.0"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "nyx-camel-sys",
+ "nyx-edataserver-sys",
+ "nyx-icalglib-sys",
+ "shell-words",
+ "system-deps 9.0.0",
+ "tempfile",
+]
+
+[[package]]
+name = "nyx-edataserver-sys"
+version = "0.1.0"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "nyx-camel-sys",
+ "nyx-json-glib-sys",
+ "nyx-libxml2-sys",
+ "shell-words",
+ "soup3-sys",
+ "system-deps 9.0.0",
+ "tempfile",
+]
+
+[[package]]
+name = "nyx-eds"
+version = "0.1.0"
+dependencies = [
+ "gio-sys",
+ "glib",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "nyx-ecal-sys",
+ "nyx-edataserver-sys",
+ "nyx-icalglib-sys",
+]
+
+[[package]]
+name = "nyx-icalglib-sys"
+version = "0.1.0"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "shell-words",
+ "system-deps 9.0.0",
+ "tempfile",
+]
+
+[[package]]
+name = "nyx-json-glib-sys"
+version = "0.1.0"
+dependencies = [
+ "gio-sys",
+ "glib-sys",
+ "gobject-sys",
+ "libc",
+ "shell-words",
+ "system-deps 9.0.0",
+ "tempfile",
+]
+
+[[package]]
+name = "nyx-libxml2-sys"
+version = "0.1.0"
+
+[[package]]
+name = "nyx-sync"
+version = "0.1.0"
+dependencies = [
+ "age",
+ "anyhow",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "nyx-when"
+version = "0.1.0"
+dependencies = [
+ "chrono",
 ]
 
 [[package]]

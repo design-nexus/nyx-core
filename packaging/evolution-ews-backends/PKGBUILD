@@ -1,6 +1,6 @@
 # evolution-ews without the Evolution mail client: the Microsoft 365 and
 # Exchange backends for evolution-data-server (calendars, task lists, address
-# books, mail), as used by GNOME Calendar, Nixe Calendar, Reminders and Contacts.
+# books, mail), as used by GNOME Calendar, Nyx Calendar, Reminders and Contacts.
 # Rebuild for every evolution-data-server minor release (3.62 → 3.64).
 
 pkgname=evolution-ews-backends

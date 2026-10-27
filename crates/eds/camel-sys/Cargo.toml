@@ -1,5 +1,5 @@
 [package]
-name = "nixe-camel-sys"
+name = "nyx-camel-sys"
 version = "0.1.0"
 description = "Opaque libcamel types referenced by the EDS FFI crates"
 edition = "2021"

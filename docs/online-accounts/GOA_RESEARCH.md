@@ -14,7 +14,7 @@ Inspected 2026-10-20 on Omarchy (Arch) Hyprland. Packages queried with `pacman`;
 | `evolution-ews` | — | **no** | — |
 | `gnome-keyring` | 1:51.1-1 | **yes**, running | no |
 | `libsecret` | 0.21.8.2-1 | **yes** | no |
-| `libadwaita` | 1:1.10.0-1 | yes (unused by Nixe) | no |
+| `libadwaita` | 1:1.10.0-1 | yes (unused by Nyx) | no |
 | `xdg-desktop-portal-hyprland` | 1.4.1-2 | yes | no |
 
 `gnome-online-accounts` 3.58.1 depends on: dbus, dconf, gcr-4, glib2, gtk4, libadwaita, json-glib, krb5, librest, libsecret, libsoup3, libgoa. Optional: a browser for OAuth; `gvfs-goa` / `gvfs-onedrive` for files.
@@ -106,7 +106,7 @@ It does not run OAuth. Passing empty credentials does not sign the user in.
 
 Useful properties (all from upstream docs):
 
-| Property | Access | Use in Nixe |
+| Property | Access | Use in Nyx |
 | --- | --- | --- |
 | `ProviderType` | read | google, webdav, `ms_graph` (Microsoft 365), exchange, imap_smtp, kerberos, … |
 | `ProviderName` | read | UI |
@@ -125,7 +125,7 @@ Methods:
 
 Service interfaces (`org.gnome.OnlineAccounts.Mail`, `.Calendar`, `.Contacts`, `.Files`, `.OAuth2`, `.Password`, …) appear and disappear when Disabled flags change. The UI must list **interfaces on the object**, not a hardcoded provider matrix.
 
-`OAuth2.GetAccessToken` / `Password.GetPassword` return secrets to same-uid callers. Nixe Settings must not display them. A Nixe D-Bus API must not re-export them.
+`OAuth2.GetAccessToken` / `Password.GetPassword` return secrets to same-uid callers. Nyx Settings must not display them. A Nyx D-Bus API must not re-export them.
 
 ## Configuration
 
@@ -148,11 +148,11 @@ Risks on a non-GNOME session:
 - Keyring must be unlocked (already true for this session once the user has signed in).
 - Portal OpenURI should work via `xdg-desktop-portal-gtk` / Hyprland.
 
-**Unverified until install.** Known issues in the XApp tracker: keyring collection missing, browser not opening. Nixe must surface those as errors, not as “connected”.
+**Unverified until install.** Known issues in the XApp tracker: keyring collection missing, browser not opening. Nyx must surface those as errors, not as “connected”.
 
 ## Third-party policy
 
-GNOME’s GOA goals: accounts are for the **core GNOME system and apps**. Third-party consumers should talk to GOA maintainers. Applications using GOA use **GNOME’s OAuth client IDs**. Forking those IDs into a Nixe OAuth crate can get GNOME’s Google/Microsoft access revoked.
+GNOME’s GOA goals: accounts are for the **core GNOME system and apps**. Third-party consumers should talk to GOA maintainers. Applications using GOA use **GNOME’s OAuth client IDs**. Forking those IDs into a Nyx OAuth crate can get GNOME’s Google/Microsoft access revoked.
 
 Acceptable:
 
@@ -161,7 +161,7 @@ Acceptable:
 
 Not acceptable:
 
-- Copy `goagoogleprovider.c` / client secrets into Nixe
+- Copy `goagoogleprovider.c` / client secrets into Nyx
 - Parse `accounts.conf` or keyring items
 
 ## Rust bindings
@@ -171,9 +171,9 @@ Not acceptable:
 | crates.io `goa` 0.0.3 (`libgoa-rs`) | Stale; do not use |
 | gtk-rs official crates | No Goa crate |
 | GIR-generate `goa` | Possible; extra maintenance |
-| gio 0.22 against ObjectManager | **Chosen** (Phase 1 `nixe-accounts`) |
+| gio 0.22 against ObjectManager | **Chosen** (Phase 1 `nyx-accounts`) |
 | zbus/tokio | Extra runtime; skip |
-| Bind `goa-backend` | Only if Nixe embeds add-account; pulls GTK4 + libadwaita |
+| Bind `goa-backend` | Only if Nyx embeds add-account; pulls GTK4 + libadwaita |
 
 ## gnome-online-accounts-gtk
 
@@ -183,21 +183,21 @@ Not acceptable:
 - Designed for Cinnamon and other non-GNOME desktops
 - Arch extra 3.50.11 vs GOA 3.58.1: version skew exists; Cinnamon/Arch already ship this pair. Confirm after install that add-account still runs.
 
-This is the supported standalone entry point. It will look like Adwaita, not Nixe. That is an accepted Phase 2 limitation.
+This is the supported standalone entry point. It will look like Adwaita, not Nyx. That is an accepted Phase 2 limitation.
 
-## Compatibility with Nixe Settings
+## Compatibility with Nyx Settings
 
 | Constraint | Impact |
 | --- | --- |
-| No libadwaita in Nixe apps | Settings must not link `goa-backend`. Helper is a separate process. |
-| No WebKit in Nixe apps | Fine; GOA dropped WebKit. |
+| No libadwaita in Nyx apps | Settings must not link `goa-backend`. Helper is a separate process. |
+| No WebKit in Nyx apps | Fine; GOA dropped WebKit. |
 | STYLE.md | List/detail native; add/reauth window is the helper. |
 | gtk4 0.11 | D-Bus client has no GTK requirement. |
 
 ## Limitations (Phase 0)
 
 1. Add-account is not a public one-shot D-Bus login.
-2. Native Nixe OAuth is not promised.
+2. Native Nyx OAuth is not promised.
 3. GOA not installed here; D-Bus activation untested.
 4. Live Google / Microsoft / Nextcloud not tested.
 5. Google Files may be disabled in GOA 3.58 (`Disable google provider Files feature` in 3.58.0 notes). UI must hide Files when the interface is absent.

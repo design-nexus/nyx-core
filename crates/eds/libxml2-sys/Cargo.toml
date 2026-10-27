@@ -1,5 +1,5 @@
 [package]
-name = "nixe-libxml2-sys"
+name = "nyx-libxml2-sys"
 version = "0.1.0"
 description = "Opaque libxml2 types referenced by the EDS FFI crates"
 edition = "2021"

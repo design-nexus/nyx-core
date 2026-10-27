@@ -1,24 +1,24 @@
 [workspace]
 resolver = "3"
 members = [
-  "crates/nixe-core",
-  "crates/nixe-accounts",
-  "crates/nixe-sync",
+  "crates/nyx-core",
+  "crates/nyx-accounts",
+  "crates/nyx-sync",
   "crates/eds/libxml2-sys",
   "crates/eds/json-glib-sys",
   "crates/eds/camel-sys",
   "crates/eds/icalglib-sys",
   "crates/eds/edataserver-sys",
   "crates/eds/ecal-sys",
-  "crates/nixe-eds",
-  "crates/nixe-when",
+  "crates/nyx-eds",
+  "crates/nyx-when",
 ]
 
 [workspace.package]
 edition = "2024"
 license = "MIT"
 authors = ["Ken Smith"]
-repository = "https://github.com/design-nexus/nixe-core"
+repository = "https://github.com/design-nexus/nyx-core"
 
 [profile.release]
 lto = "thin"

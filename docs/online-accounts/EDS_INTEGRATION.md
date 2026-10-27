@@ -10,7 +10,7 @@ Provides: `libcamel-1.2`, `libebook-1.2`, `libecal-2.0`, `libedataserver-1.2`, `
 
 Depends on: gtk3, webkit2gtk-4.1, libgoa, libical, libsecret, libsoup3, nss, …
 
-Optional split: `libedataserverui4` (GTK4 credential prompts / WebDAV discover widgets). Nixe should avoid that UI library (WebKitGTK 6). Use D-Bus/`libedataserver` only.
+Optional split: `libedataserverui4` (GTK4 credential prompts / WebDAV discover widgets). Nyx should avoid that UI library (WebKitGTK 6). Use D-Bus/`libedataserver` only.
 
 `evolution-ews` is a **separate** package for Exchange / Microsoft 365 Camel and calendar backends. Without it, a GOA M365 account may only expose Files (OneDrive).
 
@@ -36,14 +36,14 @@ flowchart LR
 
 The registry module creates a collection source whose `ESourceGoa` extension stores the GOA account id. Children are mail identity/transport, address books, calendars, task lists. Enabling/disabling a GOA service should make the registry add or drop the matching children (asynchronously).
 
-On-disk: `~/.config/evolution/sources/*.source`. Cache under `~/.cache/evolution/`. Nixe must not edit those files.
+On-disk: `~/.config/evolution/sources/*.source`. Cache under `~/.cache/evolution/`. Nyx must not edit those files.
 
 ## Contacts
 
-Current Nixe Contacts:
+Current Nyx Contacts:
 
-- App id `io.github.design_nexus.nixe.Contacts`
-- Store: `$XDG_DATA_HOME/nixe-contacts/contacts.db` (SQLite `user_version=1`, JSON rows)
+- App id `io.github.design_nexus.nyx.Contacts`
+- Store: `$XDG_DATA_HOME/nyx-contacts/contacts.db` (SQLite `user_version=1`, JSON rows)
 - No network, no CardDAV
 - README: “Account synchronization … outside this local release”
 
@@ -55,21 +55,21 @@ Duplicates across local + Google should stay a review UI (Contacts already has D
 
 ## Calendar and Reminders
 
-No Nixe Calendar/Reminders GTK apps exist in the workspace yet (Assistant has a reminders plugin). When they are built:
+No Nyx Calendar/Reminders GTK apps exist in the workspace yet (Assistant has a reminders plugin). When they are built:
 
 - Calendars: EDS `ECalClient` (CalDAV, Google via EDS, M365 via evolution-ews)
-- Tasks: EDS VTODO lists. TickTick-style extras (priority views, local metadata) may live in a Nixe sidecar keyed by EDS uid; they are not GOA capabilities.
+- Tasks: EDS VTODO lists. TickTick-style extras (priority views, local metadata) may live in a Nyx sidecar keyed by EDS uid; they are not GOA capabilities.
 
 ## Mail decision
 
-**Superseded (2026-10-21).** Mail does not use Camel. Nixe Mail runs its own IMAP/SMTP engine (`nixe-maild`) and takes server settings from the GOA `Mail` interface and credentials from GOA `OAuth2` / `Password` in-process, for each connection. Nothing is copied or stored. Reasons and details: [../pim/ARCHITECTURE.md](../pim/ARCHITECTURE.md#why-mail-is-not-in-eds).
+**Superseded (2026-10-21).** Mail does not use Camel. Nyx Mail runs its own IMAP/SMTP engine (`nyx-maild`) and takes server settings from the GOA `Mail` interface and credentials from GOA `OAuth2` / `Password` in-process, for each connection. Nothing is copied or stored. Reasons and details: [../pim/ARCHITECTURE.md](../pim/ARCHITECTURE.md#why-mail-is-not-in-eds).
 
 Message bodies render in a locked-down WebKitGTK 6 view inside the Mail UI (no JavaScript, no network unless images are allowed). EDS is still the engine for calendars, task lists and address books.
 
 ## Drive and Notes
 
 - **Drive:** keep rclone (and any existing storage code). `gvfs-goa` / `gvfs-google` / `gvfs-onedrive` may mount GOA Files in the portal file chooser. Do not feed GOA tokens to rclone; the secret format is private and the OAuth client is GNOME’s.
-- **Notes:** local Markdown remains sufficient. Optional Nextcloud via `nixe-sync` WebDAV with that crate’s own `secret-tool` attributes, until/unless a later phase points `nixe-sync` at a GOA WebDAV account **without** copying the token into Nixe config (EDS/GVfs, or a locked GOA Password interface call in-process).
+- **Notes:** local Markdown remains sufficient. Optional Nextcloud via `nyx-sync` WebDAV with that crate’s own `secret-tool` attributes, until/unless a later phase points `nyx-sync` at a GOA WebDAV account **without** copying the token into Nyx config (EDS/GVfs, or a locked GOA Password interface call in-process).
 
 ## Rust bindings
 
@@ -87,8 +87,8 @@ EDS is **optional**. Settings Online Accounts works with GOA alone. Contacts wor
 
 ## Limitations
 
-- EDS pulls gtk3 + webkit2gtk-4.1 even if Nixe never opens those widgets.
+- EDS pulls gtk3 + webkit2gtk-4.1 even if Nyx never opens those widgets.
 - M365 PIM needs `evolution-ews`.
 - Google contacts are CardDAV now (GData Contacts API is gone).
 - Registry GOA module can race (upstream deadlock reports with M365 + Camel). Treat “EDS not answering” as an error state.
-- Credential prompts in EDS UI are Adwaita/GTK; Nixe should send the user to Settings → Online Accounts / the GOA helper instead of embedding `ECredentialsPrompter`.
+- Credential prompts in EDS UI are Adwaita/GTK; Nyx should send the user to Settings → Online Accounts / the GOA helper instead of embedding `ECredentialsPrompter`.

@@ -2,7 +2,7 @@
 
 Automated tests cannot complete a real Google OAuth login. Split: crate tests without GOA, session tests on Omarchy, live provider tests with throwaway accounts.
 
-## A. Crate tests (`nixe-accounts`, Phase 1+)
+## A. Crate tests (`nyx-accounts`, Phase 1+)
 
 Run on a private D-Bus or with a fake `org.gnome.OnlineAccounts` object manager.
 
@@ -16,14 +16,14 @@ Run on a private D-Bus or with a fake `org.gnome.OnlineAccounts` object manager.
 - `open_management` looks up `gnome-online-accounts-gtk` and errors if missing.
 
 ```sh
-cargo test -p nixe-accounts
-cargo clippy -p nixe-accounts --all-targets -- -D warnings
+cargo test -p nyx-accounts
+cargo clippy -p nyx-accounts --all-targets -- -D warnings
 ```
 
 Settings must still build and test with GOA uninstalled:
 
 ```sh
-cargo test -p nixe-settings
+cargo test -p nyx-settings
 ```
 
 Contacts tests keep using a scratch `XDG_DATA_HOME` so `contacts.db` is never the real book.
@@ -72,8 +72,8 @@ Nextcloud: if discovery fails, the helper error must be visible; do not write a 
 
 ## E. Security
 
-- `journalctl --user -u gnome-keyring-daemon` / Nixe logs during add-account: no access token.
-- `grep -R 'ya29\|1//' ~/.config/nixe ~/.config/nixe-settings` empty of GOA tokens.
+- `journalctl --user -u gnome-keyring-daemon` / Nyx logs during add-account: no access token.
+- `grep -R 'ya29\|1//' ~/.config/nyx ~/.config/nyx-settings` empty of GOA tokens.
 - `accounts.conf` has no access/refresh tokens (Google: Provider/Identity; Microsoft: plus OAuth2 URIs/client id, empty ClientSecret).
 
 ## F. What Phase 0 can run now
