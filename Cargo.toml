@@ -11,6 +11,8 @@ members = [
   "crates/eds/edataserver-sys",
   "crates/eds/ecal-sys",
   "crates/nyx-eds",
+  "crates/nyx-pim",
+  "crates/nyx-pim-migrate",
   "crates/nyx-when",
 ]
 
