@@ -92,6 +92,10 @@ impl Workspace {
 pub struct Window {
     /// Without `0x`, lower case (see [`crate::event::address`]).
     pub address: String,
+    /// Hyprland's `stableId`: the identifier the same window has in the standard
+    /// `ext-foreign-toplevel-list` protocol (used to capture its image). Empty until
+    /// Hyprland has been asked about a window that just opened.
+    pub stable_id: String,
     pub class: String,
     pub initial_class: String,
     pub title: String,
@@ -248,6 +252,7 @@ impl Desktop {
                         0,
                         Window {
                             address: address.clone(),
+                            stable_id: String::new(),
                             class: class.clone(),
                             initial_class: class.clone(),
                             title: title.clone(),
@@ -502,6 +507,8 @@ impl From<RawWorkspace> for Workspace {
 #[serde(default, rename_all = "camelCase")]
 struct RawClient {
     address: String,
+    #[serde(rename = "stableId")]
+    stable_id: String,
     mapped: bool,
     hidden: bool,
     at: [i32; 2],
@@ -523,6 +530,7 @@ impl From<RawClient> for Window {
     fn from(r: RawClient) -> Self {
         Window {
             address: address(&r.address),
+            stable_id: r.stable_id,
             class: r.class,
             initial_class: r.initial_class,
             title: r.title,
@@ -576,6 +584,7 @@ mod tests {
         assert_eq!(headless.stable_id(), "HEADLESS-20");
         assert_eq!(d.windows.len(), 3, "unmapped clients are left out");
         assert_eq!(d.windows[0].address, "55ef7100a730");
+        assert_eq!(d.windows[0].stable_id, "18000369");
         assert_eq!(d.active_window.as_deref(), Some("55ef7100a730"));
     }
 

@@ -1,9 +1,9 @@
 [
-  {"address": "0x55ef72c2b830", "mapped": true, "hidden": false, "at": [10, 36], "size": [1580, 954], "workspace": {"id": 2, "name": "2"}, "floating": false, "pinned": false,
+  {"address": "0x55ef72c2b830", "stableId": "1800036a", "mapped": true, "hidden": false, "at": [10, 36], "size": [1580, 954], "workspace": {"id": 2, "name": "2"}, "floating": false, "pinned": false,
    "monitor": 0, "class": "firefox", "title": "Mail — Firefox", "initialClass": "firefox", "initialTitle": "Mozilla Firefox", "pid": 4100, "xwayland": false, "fullscreen": 0, "focusHistoryID": 1},
-  {"address": "0x55ef710f3ae0", "mapped": true, "hidden": false, "at": [10, 36], "size": [1580, 954], "workspace": {"id": 5, "name": "5"}, "floating": false, "pinned": false,
+  {"address": "0x55ef710f3ae0", "stableId": "18000173", "mapped": true, "hidden": false, "at": [10, 36], "size": [1580, 954], "workspace": {"id": 5, "name": "5"}, "floating": false, "pinned": false,
    "monitor": 0, "class": "kitty", "title": "~", "initialClass": "kitty", "initialTitle": "kitty", "pid": 4200, "xwayland": false, "fullscreen": 0, "focusHistoryID": 2},
-  {"address": "0x55ef7100a730", "mapped": true, "hidden": false, "at": [10, 36], "size": [1580, 954], "workspace": {"id": 1, "name": "1"}, "floating": false, "pinned": false,
+  {"address": "0x55ef7100a730", "stableId": "18000369", "mapped": true, "hidden": false, "at": [10, 36], "size": [1580, 954], "workspace": {"id": 1, "name": "1"}, "floating": false, "pinned": false,
    "monitor": 0, "class": "firefox", "title": "Share Sheet — Firefox", "initialClass": "firefox", "initialTitle": "Mozilla Firefox", "pid": 4100, "xwayland": false, "fullscreen": 0, "focusHistoryID": 0},
   {"address": "0x55ef70000001", "mapped": false, "hidden": true, "at": [0, 0], "size": [0, 0], "workspace": {"id": -1, "name": ""}, "floating": false, "pinned": false,
    "monitor": -1, "class": "", "title": "", "initialClass": "", "initialTitle": "", "pid": 4300, "xwayland": false, "fullscreen": 0, "focusHistoryID": -1}
