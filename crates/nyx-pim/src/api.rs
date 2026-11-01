@@ -493,7 +493,10 @@ impl Registry {
                     }
                     calendar.import_all(&payload)?;
                     self.save_api_resource(&source_id, uid, "", &id, &etag)?;
-                    self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,'',?3) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",rusqlite::params![source_id,uid,payload]).map_err(error)?;
+                    // Dirty edits still refer to the retained editor baseline, even if the provider adds metadata.
+                    if !dirty {
+                        self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,'',?3) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",rusqlite::params![source_id,uid,payload]).map_err(error)?;
+                    }
                     snapshot.commit()?;
                 }
                 let known: Vec<(String, String)> = {
@@ -741,7 +744,10 @@ impl Registry {
                     }
                     calendar.import_all(&payload)?;
                     self.save_api_resource(&source_id, uid, rid, &remote_id, &etag)?;
-                    self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",rusqlite::params![source_id,uid,rid,payload]).map_err(error)?;
+                    // Dirty edits still refer to the retained editor baseline, even if the provider adds metadata.
+                    if !dirty {
+                        self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",rusqlite::params![source_id,uid,rid,payload]).map_err(error)?;
+                    }
                 } else {
                     projection_failed = true;
                 }

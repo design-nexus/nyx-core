@@ -1765,7 +1765,7 @@ dependencies = [
 [[package]]
 name = "nyx-accounts-service"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nyx-accounts.git?rev=cd09038cc20498f33c3855da5262f2142ffc760a#cd09038cc20498f33c3855da5262f2142ffc760a"
+source = "git+https://github.com/design-nexus/nyx-accounts.git?rev=5a0ed8fbe022a6953aba856979478716669fa3f1#5a0ed8fbe022a6953aba856979478716669fa3f1"
 dependencies = [
  "anyhow",
  "futures-util",
@@ -1912,7 +1912,7 @@ dependencies = [
  "html2text",
  "ical",
  "libc",
- "nyx-accounts-service 0.1.0 (git+https://github.com/design-nexus/nyx-accounts.git?rev=cd09038cc20498f33c3855da5262f2142ffc760a)",
+ "nyx-accounts-service 0.1.0 (git+https://github.com/design-nexus/nyx-accounts.git?rev=5a0ed8fbe022a6953aba856979478716669fa3f1)",
  "nyx-icalglib-sys",
  "reqwest",
  "roxmltree",
