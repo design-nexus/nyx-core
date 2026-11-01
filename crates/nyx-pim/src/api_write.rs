@@ -59,10 +59,10 @@ fn event_body(item: &Item, payload: &str, google: bool, skip_recurrence: bool) -
         value["recurrence"] = json!(recurrence);
         if let Some(zone) = payload.lines().find_map(|line| line.strip_prefix("DTSTART;TZID=").and_then(|s| s.split(':').next()))
         {
-            if zone.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)) {
-                value["start"]["timeZone"] = json!(zone);
-                value["end"]["timeZone"] = json!(zone);
-            }
+            let canonical = crate::zones::zone(zone).map(|z|z.name().to_owned())
+                .ok_or_else(||error("The provider cannot represent this event's time zone; your edit is retained"))?;
+            value["start"]["timeZone"] = json!(canonical);
+            value["end"]["timeZone"] = json!(canonical);
         }
         value["reminders"] = json!({"useDefault":false,"overrides":item.alarms.iter().map(|minutes|json!({"method":"popup","minutes":minutes})).collect::<Vec<_>>()});
     } else if skip_recurrence {
@@ -759,6 +759,13 @@ mod tests {
         );
         calendar.import(&payload).unwrap();
         calendar.get("fixture", None).unwrap()
+    }
+    #[test]
+    fn google_recurring_events_keep_libical_named_timezones() {
+        let value=event_body(&item(Some("FREQ=DAILY;COUNT=3")),
+            "DTSTART;TZID=/freeassociation.sourceforge.net/America/Chicago:20261030T090000\r\nRRULE:FREQ=DAILY;COUNT=3",true,false).unwrap();
+        assert_eq!(value["start"]["timeZone"],"America/Chicago");
+        assert_eq!(value["end"]["timeZone"],"America/Chicago");
     }
     #[test]
     fn monthly_graph_rule_retains_ordinal_and_count() {

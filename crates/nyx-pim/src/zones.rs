@@ -3,6 +3,7 @@ use chrono::{DateTime, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
 use std::{collections::HashMap, sync::OnceLock};
 pub(crate) fn zone(name: &str) -> Option<Tz> {
+    let name = name.strip_prefix("/freeassociation.sourceforge.net/").unwrap_or(name);
     if let Ok(zone) = name.parse() {
         return Some(zone);
     }
