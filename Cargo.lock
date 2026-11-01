@@ -1765,6 +1765,29 @@ dependencies = [
 [[package]]
 name = "nyx-accounts-service"
 version = "0.1.0"
+source = "git+https://github.com/design-nexus/nyx-accounts.git?rev=cd09038cc20498f33c3855da5262f2142ffc760a#cd09038cc20498f33c3855da5262f2142ffc760a"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "gio",
+ "glib",
+ "oauth2",
+ "reqwest",
+ "roxmltree",
+ "rusqlite",
+ "secret-service",
+ "serde",
+ "serde_json",
+ "tokio",
+ "url",
+ "uuid",
+ "zbus",
+ "zeroize",
+]
+
+[[package]]
+name = "nyx-accounts-service"
+version = "0.1.0"
 source = "git+https://github.com/design-nexus/nyx-accounts.git?rev=ecbe31cbfe6688dd5b3d7803c58e433715427c57#ecbe31cbfe6688dd5b3d7803c58e433715427c57"
 dependencies = [
  "anyhow",
@@ -1889,7 +1912,7 @@ dependencies = [
  "html2text",
  "ical",
  "libc",
- "nyx-accounts-service",
+ "nyx-accounts-service 0.1.0 (git+https://github.com/design-nexus/nyx-accounts.git?rev=cd09038cc20498f33c3855da5262f2142ffc760a)",
  "nyx-icalglib-sys",
  "reqwest",
  "roxmltree",
@@ -1909,7 +1932,7 @@ dependencies = [
  "gio",
  "glib",
  "nyx-accounts",
- "nyx-accounts-service",
+ "nyx-accounts-service 0.1.0 (git+https://github.com/design-nexus/nyx-accounts.git?rev=ecbe31cbfe6688dd5b3d7803c58e433715427c57)",
  "nyx-eds",
  "nyx-pim",
  "serde",

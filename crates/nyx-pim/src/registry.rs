@@ -31,12 +31,12 @@ pub struct Registry {
     pub(crate) pending: Rc<std::cell::Cell<bool>>,
 }
 pub struct Watch {
-    source: Option<glib::SourceId>,
+    source: Option<glib::JoinHandle<()>>,
 }
 impl Drop for Watch {
     fn drop(&mut self) {
         if let Some(s) = self.source.take() {
-            s.remove();
+            s.abort();
         }
     }
 }
@@ -157,7 +157,9 @@ CREATE TABLE IF NOT EXISTS alarms(source TEXT,uid TEXT,rid TEXT,due INTEGER,unti
     pub fn watch(&self, on_change: impl Fn() + 'static) -> Watch {
         let db = self.db.clone();
         let mut previous = -1i64;
-        let source = glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
+        let source = glib::MainContext::ref_thread_default().spawn_local(async move {
+          loop {
+            glib::timeout_future(std::time::Duration::from_secs(1)).await;
             let current = db.borrow().query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0)).unwrap_or(previous);
             let changes = db.borrow().total_changes() as i64;
             let version = current + changes;
@@ -165,7 +167,7 @@ CREATE TABLE IF NOT EXISTS alarms(source TEXT,uid TEXT,rid TEXT,due INTEGER,unti
                 on_change();
             }
             previous = version;
-            glib::ControlFlow::Continue
+          }
         });
         Watch { source: Some(source) }
     }
@@ -177,7 +179,8 @@ impl Registry {
             return;
         }
         let registry = self.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_secs(1), move || {
+        glib::MainContext::ref_thread_default().spawn_local(async move {
+            glib::timeout_future(std::time::Duration::from_secs(1)).await;
             registry.pending.set(false);
             let _ = registry.refresh_accounts(service);
         });

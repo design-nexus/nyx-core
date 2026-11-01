@@ -84,6 +84,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn worker_watch_uses_its_own_main_context() {
+        let desktop = glib::MainContext::default();
+        let _desktop_owner = desktop.acquire().unwrap();
+        std::thread::spawn(|| {
+            let worker = glib::MainContext::new();
+            worker.with_thread_default(|| {
+                let path = std::env::temp_dir().join(format!("nyx-watch-{}", uuid::Uuid::new_v4())).join("pim.sqlite3");
+                let registry = Registry::open(path.clone()).unwrap();
+                let watch = registry.watch(|| {});
+                drop(watch);
+                drop(registry);
+                let _ = std::fs::remove_dir_all(path.parent().unwrap());
+            }).unwrap();
+        }).join().unwrap();
+    }
+
+    #[test]
     fn cstring_drops_interior_nul() {
         assert_eq!(cstring("a\0b").as_bytes(), b"ab");
     }
