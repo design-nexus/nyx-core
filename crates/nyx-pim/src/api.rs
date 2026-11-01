@@ -413,8 +413,10 @@ impl Registry {
                     )
                     .map_err(error)?;
                 let calendar = Calendar::open(self, &source_id, Kind::TaskList, None)?;
+                let mut seen = std::collections::HashSet::new();
                 for task in pages(remote, endpoint.as_str(), if google { "items" } else { "value" })? {
                     let id = text(&task, "id");
+                    seen.insert(id.clone());
                     self.save_api_payload(&remote.account.id, "task", &id, &task)?;
                     let mut lines = vec!["BEGIN:VTODO".into(), format!("UID:{}", escape(&id))];
                     property(&mut lines, "SUMMARY", &text(&task, "title"));
@@ -487,11 +489,46 @@ impl Registry {
                         )
                         .map_err(error)?;
                     if dirty && self.api_resource(&source_id, uid, "").is_some_and(|(_, old)| old != etag) {
+                        self.record_issue(&source_id, uid, "", "api", &payload, &etag, &id, false)?;
                         return Err(error("Online task changed while you edited it; your local edit is retained"));
                     }
                     calendar.import_all(&payload)?;
                     self.save_api_resource(&source_id, uid, "", &id, &etag)?;
                     self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,'',?3) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",rusqlite::params![source_id,uid,payload]).map_err(error)?;
+                }
+                let known: Vec<(String, String)> = {
+                    let db = self.db.borrow();
+                    let mut query =
+                        db.prepare("SELECT uid,remote_id FROM api_resources WHERE source=?1 AND rid='' ").map_err(error)?;
+                    query
+                        .query_map([&source_id], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .map_err(error)?
+                        .collect::<Result<_, _>>()
+                        .map_err(error)?
+                };
+                for (uid, id) in known {
+                    if !seen.contains(&id) {
+                        let dirty: bool = self
+                            .db
+                            .borrow()
+                            .query_row(
+                                "SELECT EXISTS(SELECT 1 FROM objects WHERE source=?1 AND uid=?2 AND dirty=1 AND deleted=0)",
+                                rusqlite::params![source_id, uid],
+                                |r| r.get(0),
+                            )
+                            .map_err(error)?;
+                        if dirty {
+                            self.record_issue(&source_id, &uid, "*", "api", "", "", &id, true)?;
+                            return Err(error("An edited task was removed remotely. Your local edit is retained."));
+                        }
+                        self.db
+                            .borrow()
+                            .execute(
+                                "UPDATE objects SET deleted=1,dirty=0 WHERE source=?1 AND uid=?2",
+                                rusqlite::params![source_id, uid],
+                            )
+                            .map_err(error)?;
+                    }
                 }
                 self.upload_api_tasks(&source_id, endpoint.as_str(), remote)?;
                 self.set_healthy(&source_id, true);
@@ -574,12 +611,38 @@ impl Registry {
                             .db
                             .borrow()
                             .query_row(
-                                "SELECT EXISTS(SELECT 1 FROM objects WHERE source=?1 AND uid=?2 AND rid=?3 AND dirty=1)",
+                                "SELECT EXISTS(SELECT 1 FROM objects WHERE source=?1 AND uid=?2 AND (?3='' OR rid=?3) AND dirty=1)",
                                 rusqlite::params![source_id, uid, rid],
                                 |r| r.get(0),
                             )
                             .map_err(error)?;
                         if dirty {
+                            if rid.is_empty() {
+                                self.record_issue(&source_id, &uid, "*", "api", "", "", &remote_id, true)?;
+                            } else {
+                                let payload = calendar.ics(&uid, Some(&rid)).or_else(|_| calendar.ics(&uid, None))?;
+                                let component = calendar.component(&payload)?;
+                                unsafe {
+                                    crate::ical::detach(component.ptr(), &rid, false);
+                                    crate::ical::apply(
+                                        component.ptr(),
+                                        &Draft { status: Some(Status::Cancelled), ..Default::default() },
+                                    );
+                                }
+                                let payload =
+                                    unsafe { crate::owned(ical_glib_sys::i_cal_component_as_ical_string(component.ptr())) }
+                                        .ok_or_else(|| error("Cancelled occurrence could not be preserved"))?;
+                                self.record_issue(
+                                    &source_id,
+                                    &uid,
+                                    &rid,
+                                    "api",
+                                    &payload,
+                                    &text(&value, "etag"),
+                                    &remote_id,
+                                    false,
+                                )?;
+                            }
                             return Err(error("A locally edited event was cancelled remotely; your edit is retained"));
                         }
                         if rid.is_empty() {
@@ -666,7 +729,7 @@ impl Registry {
                         )
                         .map_err(error)?;
                     if dirty && self.api_resource(&source_id, uid, rid).is_some_and(|(_, previous)| previous != etag) {
-                        self.db.borrow().execute("INSERT INTO remote_conflicts VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid) DO UPDATE SET payload=excluded.payload,etag=excluded.etag",rusqlite::params![source_id,uid,payload,etag]).map_err(error)?;
+                        self.record_issue(&source_id, uid, rid, "api", &payload, &etag, &remote_id, false)?;
                         return Err(error("Online event changed while you edited it. Both versions are retained."));
                     }
                     calendar.import_all(&payload)?;
@@ -698,6 +761,7 @@ impl Registry {
                         )
                         .map_err(error)?;
                     if dirty {
+                        self.record_issue(&source_id, &uid, "*", "api", "", "", &remote_id, true)?;
                         return Err(error("An edited event was removed remotely. Your local edit is retained."));
                     }
                     self.db

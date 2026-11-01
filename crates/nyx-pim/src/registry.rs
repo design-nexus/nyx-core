@@ -56,6 +56,7 @@ impl Registry {
         std::fs::create_dir_all(dir).map_err(error)?;
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(error)?;
         let db = Connection::open(&path).map_err(error)?;
+        db.busy_timeout(std::time::Duration::from_secs(5)).map_err(error)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(error)?;
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS sources(uid TEXT PRIMARY KEY, data TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1);

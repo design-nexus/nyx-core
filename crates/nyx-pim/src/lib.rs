@@ -98,3 +98,6 @@ mod api_write;
 pub mod contacts;
 mod sync;
 mod zones;
+
+mod issues;
+pub use issues::{Resolution, SyncIssue};

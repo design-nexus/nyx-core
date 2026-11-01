@@ -5,6 +5,7 @@ use nyx_accounts_native::{Client, model::Service, remote::Remote};
 impl Registry {
     /// Explicit refresh from an application worker, with the application's service grant.
     pub fn refresh_accounts(&self, service: Service) -> Result<(), Error> {
+        let _guard = self.sync_lock()?;
         let client = Client::connect().map_err(error)?;
         let mut failures = Vec::new();
         for account in client.list().map_err(error)?.into_iter().filter(|a| a.enabled.contains(&service)) {
@@ -122,7 +123,16 @@ impl Registry {
                     )
                     .ok();
                 if dirty && previous.as_deref() != object.etag.as_deref() {
-                    self.db.borrow().execute("INSERT INTO remote_conflicts VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid) DO UPDATE SET payload=excluded.payload,etag=excluded.etag",rusqlite::params![source,uid,object.payload,object.etag]).map_err(error)?;
+                    self.record_issue(
+                        source,
+                        &uid,
+                        "*",
+                        "dav",
+                        &object.payload,
+                        object.etag.as_deref().unwrap_or(""),
+                        &object.href,
+                        false,
+                    )?;
                     return Err(error(
                         "An online item changed while you edited it. Both versions are retained; resolve the conflict before uploading.",
                     ));
@@ -147,6 +157,7 @@ impl Registry {
                     )
                     .map_err(error)?;
                 if dirty {
+                    self.record_issue(source, uid, "*", "dav", "", "", "", true)?;
                     return Err(error("An edited item was removed remotely. Your local edit is retained."));
                 }
                 self.db
@@ -162,27 +173,24 @@ impl Registry {
         };
         for uid in pending {
             let existing = known.iter().find(|(id, _, _)| id == &uid);
-            let count: i64 = self
-                .db
-                .borrow()
-                .query_row(
-                    "SELECT count(*) FROM objects WHERE source=?1 AND uid=?2 AND deleted=0",
-                    rusqlite::params![source, uid],
-                    |r| r.get(0),
-                )
-                .map_err(error)?;
-            if count == 0 {
+            let snapshot: Vec<(String, String, bool)> = {
+                let db = self.db.borrow();
+                let mut query = db
+                    .prepare("SELECT rid,payload,deleted FROM objects WHERE source=?1 AND uid=?2 ORDER BY rid")
+                    .map_err(error)?;
+                query
+                    .query_map(rusqlite::params![source, uid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(error)?
+                    .collect::<Result<_, _>>()
+                    .map_err(error)?
+            };
+            if snapshot.iter().all(|(_, _, deleted)| *deleted) {
                 if let Some((_, href, etag)) = existing {
                     remote.dav_delete(endpoint, href, etag.as_deref().unwrap_or("")).map_err(error)?;
                 }
             } else {
-                let payloads: Vec<String> = {
-                    let db = self.db.borrow();
-                    let mut q = db
-                        .prepare("SELECT payload FROM objects WHERE source=?1 AND uid=?2 AND deleted=0 ORDER BY rid")
-                        .map_err(error)?;
-                    q.query_map(rusqlite::params![source, uid], |r| r.get(0)).map_err(error)?.filter_map(Result::ok).collect()
-                };
+                let payloads: Vec<String> =
+                    snapshot.iter().filter(|(_, _, deleted)| !*deleted).map(|(_, payload, _)| payload.clone()).collect();
                 let mut payload =
                     String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nyx//Online Accounts Preview//EN\r\n");
                 let originals: Vec<String> = {
@@ -221,10 +229,15 @@ impl Registry {
                 let revision = remote.dav_put(endpoint, &href, &payload, etag).map_err(error)?;
                 self.db.borrow().execute("INSERT INTO remote_resources VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid) DO UPDATE SET href=excluded.href,etag=excluded.etag",rusqlite::params![source,uid,href,revision]).map_err(error)?;
             }
-            self.db
-                .borrow()
-                .execute("UPDATE objects SET dirty=0 WHERE source=?1 AND uid=?2", rusqlite::params![source, uid])
-                .map_err(error)?;
+            for (rid, payload, deleted) in snapshot {
+                self.db
+                    .borrow()
+                    .execute(
+                        "UPDATE objects SET dirty=0 WHERE source=?1 AND uid=?2 AND rid=?3 AND payload=?4 AND deleted=?5",
+                        rusqlite::params![source, uid, rid, payload, deleted],
+                    )
+                    .map_err(error)?;
+            }
         }
         Ok(())
     }

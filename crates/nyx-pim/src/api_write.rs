@@ -448,7 +448,8 @@ impl Registry {
                     remote.json_write(target.as_str(), reqwest::Method::DELETE, &Value::Null, Some(etag)).map_err(error)?;
                 }
             } else {
-                let item = calendar.get(&uid, if rid.is_empty() { None } else { Some(&rid) })?;
+                let component = calendar.component(&payload)?;
+                let item = calendar.read(component.ptr());
                 let baseline: Option<String> = self
                     .db
                     .borrow()
@@ -533,8 +534,8 @@ impl Registry {
             self.db
                 .borrow()
                 .execute(
-                    "UPDATE objects SET dirty=0 WHERE source=?1 AND uid=?2 AND rid=?3 AND payload=?4",
-                    rusqlite::params![source, uid, rid, payload],
+                    "UPDATE objects SET dirty=0 WHERE source=?1 AND uid=?2 AND rid=?3 AND payload=?4 AND deleted=?5",
+                    rusqlite::params![source, uid, rid, payload, deleted],
                 )
                 .map_err(error)?;
         }
@@ -623,7 +624,8 @@ impl Registry {
                     remote.json_write(target.as_str(), reqwest::Method::DELETE, &Value::Null, Some(etag)).map_err(error)?;
                 }
             } else {
-                let item = calendar.get(&uid, None)?;
+                let component = calendar.component(&payload)?;
+                let item = calendar.read(component.ptr());
                 let original: Option<String> = self
                     .db
                     .borrow()
@@ -736,8 +738,8 @@ impl Registry {
             self.db
                 .borrow()
                 .execute(
-                    "UPDATE objects SET dirty=0 WHERE source=?1 AND uid=?2 AND rid='' AND payload=?3",
-                    rusqlite::params![source, uid, payload],
+                    "UPDATE objects SET dirty=0 WHERE source=?1 AND uid=?2 AND rid='' AND payload=?3 AND deleted=?4",
+                    rusqlite::params![source, uid, payload, deleted],
                 )
                 .map_err(error)?;
         }
