@@ -75,17 +75,16 @@ fn same(a: &Card, b: &Card, key: &str) -> bool {
 }
 const GOOGLE_FIELDS: &str = "names,emailAddresses,phoneNumbers,organizations,biographies,birthdays,addresses,urls,metadata";
 fn revision(raw: &Value, google: bool) -> String {
-    raw[if google { "etag" } else { "@odata.etag" }]
-        .as_str()
-        .or_else(|| {
-            raw["metadata"]["sources"]
-                .as_array()
-                .and_then(|s| s.iter().find(|s| s["type"] == "CONTACT"))
-                .and_then(|s| s["etag"].as_str())
-        })
-        .unwrap_or("")
-        .into()
+    if google {
+        // Person etags vary with the requested representation. Only the CONTACT
+        // source etag is Google's concurrency revision for contact edits.
+        raw["metadata"]["sources"].as_array()
+            .and_then(|sources| sources.iter().find(|s| s["type"] == "CONTACT"))
+            .and_then(|s| s["etag"].as_str())
+            .or_else(|| raw["etag"].as_str()).unwrap_or("").into()
+    } else { raw["@odata.etag"].as_str().unwrap_or("").into() }
 }
+
 fn typed(raw: &Value, key: &str, item: &str, val: &str) -> Value {
     let mut out =
         raw[key].as_array().and_then(|a| a.iter().find(|v| v[item].as_str() == Some(val))).cloned().unwrap_or_else(|| json!({}));
@@ -462,8 +461,17 @@ impl Registry {
             .optional()
             .map_err(error)?;
         let previous = self.contact_resource(book, uid)?;
+        // Older preview caches stored the Person etag. Compare the retained raw
+        // baseline's source revision so upgrading does not invent conflicts.
+        let baseline_revision = if !dav && raw.get("resourceName").is_some() {
+            let baseline: Option<String> = self.db.borrow().query_row(
+                "SELECT raw FROM contact_baselines WHERE book=?1 AND uid=?2", params![book,uid], |r|r.get(0)
+            ).optional().map_err(error)?;
+            baseline.as_deref().and_then(|s|serde_json::from_str::<Value>(s).ok()).map(|v|revision(&v,true))
+        } else { None };
+        let previous_revision = baseline_revision.as_deref().or_else(||previous.as_ref().map(|(_,e)|e.as_str()));
         if let Some((local, true)) = &local {
-            if previous.as_ref().map(|(_, e)| e.as_str()) != Some(etag)
+            if previous_revision != Some(etag)
                 && !(previous.is_none() && parse(local)? == parse(payload)?)
             {
                 self.record_issue(book, uid, "", if dav { "contact-dav" } else { "contact-api" }, payload, etag, id, false)?;
@@ -711,7 +719,7 @@ impl Registry {
                                 return Err(error("The contact changed before deletion. Refresh and review it first."));
                             }
                         }
-                        remote.json_write(target.as_str(), reqwest::Method::DELETE, &Value::Null, etag).map_err(error)?;
+                        remote.json_write(target.as_str(), reqwest::Method::DELETE, &Value::Null, if google { None } else { etag }).map_err(error)?;
                     }
                     (String::new(), String::new(), Value::Null)
                 } else {
@@ -742,7 +750,7 @@ impl Registry {
                         target.as_str(),
                         if existing.is_some() { reqwest::Method::PATCH } else { reqwest::Method::POST },
                         &body,
-                        etag,
+                        if google { None } else { etag },
                     ) {
                         Ok(value) => value,
                         Err(failure) => {
@@ -1017,6 +1025,15 @@ mod tests {
     }
     fn google() -> Value {
         json!({"etag":"person-1","metadata":{"sources":[{"type":"CONTACT","id":"1","etag":"source-1"}]},"organizations":[{"name":"Company","department":"Keep","title":"Old"},{"name":"Second organization"}]})
+    }
+    #[test]
+    fn google_contact_revision_ignores_person_projection_changes() {
+        let first=json!({"etag":"person-a","metadata":{"sources":[{"type":"CONTACT","etag":"contact-1"},{"type":"PROFILE","etag":"profile-1"}]}});
+        let mut projected=first.clone(); projected["etag"]=json!("person-b");
+        projected["metadata"]["sources"][1]["etag"]=json!("profile-2");
+        assert_eq!(revision(&first,true),revision(&projected,true));
+        projected["metadata"]["sources"][0]["etag"]=json!("contact-2");
+        assert_ne!(revision(&first,true),revision(&projected,true));
     }
     #[test]
     fn api_updates_omit_unchanged_fields_and_preserve_provider_metadata() {
