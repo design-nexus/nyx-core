@@ -1,0 +1,9 @@
+[
+  {"id": 5, "name": "5", "monitor": "eDP-2", "monitorID": 0, "windows": 1, "hasfullscreen": false, "lastwindow": "0x55ef710f3ae0", "tiledLayout": "dwindle"},
+  {"id": 1, "name": "1", "monitor": "eDP-2", "monitorID": 0, "windows": 1, "hasfullscreen": false, "lastwindow": "0x55ef7100a730", "tiledLayout": "dwindle"},
+  {"id": 2, "name": "2", "monitor": "eDP-2", "monitorID": 0, "windows": 1, "hasfullscreen": false, "lastwindow": "0x55ef72c2b830", "tiledLayout": "scrolling"},
+  {"id": -1337, "name": "settings-loop-start", "monitor": "eDP-2", "monitorID": 0, "windows": 0, "hasfullscreen": false, "lastwindow": "0x0", "tiledLayout": "dwindle"},
+  {"id": 11, "name": "11", "monitor": "eDP-2", "monitorID": 0, "windows": 0, "hasfullscreen": false, "lastwindow": "0x0", "tiledLayout": "dwindle"},
+  {"id": 201, "name": "201", "monitor": "HEADLESS-20", "monitorID": 1, "windows": 0, "hasfullscreen": false, "lastwindow": "0x0", "tiledLayout": "dwindle"},
+  {"id": -98, "name": "special:scratch", "monitor": "eDP-2", "monitorID": 0, "windows": 0, "hasfullscreen": false, "lastwindow": "0x0", "tiledLayout": "dwindle"}
+]

@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
   "crates/nyx-core",
+  "crates/nyx-desktop",
   "crates/nyx-accounts",
   "crates/nyx-sync",
   "crates/eds/libxml2-sys",
