@@ -41,6 +41,7 @@ impl Registry {
         Ok(file)
     }
     pub(crate) fn issues_schema(&self) -> Result<(), Error> {
+        crate::contacts::initialize(self)?;
         self.db.borrow().execute_batch("CREATE TABLE IF NOT EXISTS sync_issues(source TEXT,uid TEXT,rid TEXT,kind TEXT,payload TEXT,etag TEXT,remote_id TEXT,deleted INTEGER,PRIMARY KEY(source,uid,rid));
 CREATE TABLE IF NOT EXISTS remote_resources(source TEXT,uid TEXT,href TEXT,etag TEXT,PRIMARY KEY(source,uid));
 CREATE TABLE IF NOT EXISTS uncertain_creates(source TEXT,uid TEXT,PRIMARY KEY(source,uid));
@@ -65,7 +66,7 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
         self.issues_schema()?;
         let records: Vec<(String, String, String, String, String, String, String, bool)> = {
             let db = self.db.borrow();
-            let mut q=db.prepare("SELECT source,uid,rid,kind,payload,etag,remote_id,deleted FROM sync_issues UNION ALL SELECT source,uid,'','uncertain','','','',0 FROM uncertain_creates WHERE NOT EXISTS(SELECT 1 FROM sync_issues s WHERE s.source=uncertain_creates.source AND s.uid=uncertain_creates.uid) ORDER BY source,uid,rid").map_err(error)?;
+            let mut q=db.prepare("SELECT source,uid,rid,kind,payload,etag,remote_id,deleted FROM sync_issues UNION ALL SELECT source,uid,'',CASE WHEN EXISTS(SELECT 1 FROM books WHERE books.uid=uncertain_creates.source) THEN 'contact-uncertain' ELSE 'uncertain' END,'','','',0 FROM uncertain_creates WHERE NOT EXISTS(SELECT 1 FROM sync_issues s WHERE s.source=uncertain_creates.source AND s.uid=uncertain_creates.uid) ORDER BY source,uid,rid").map_err(error)?;
             q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))
                 .map_err(error)?
                 .collect::<Result<_, _>>()
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
                     .source(&source, Kind::Calendar)
                     .or_else(|| self.source(&source, Kind::TaskList))
                     .map(|s| s.label().to_owned())
+                    .or_else(|| self.db.borrow().query_row("SELECT name FROM books WHERE uid=?1", [&source], |r| r.get(0)).ok())
                     .unwrap_or_else(|| source.clone());
                 let revision = format!(
                     "{:x}",
@@ -93,6 +95,15 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
     }
     fn issue_local(&self, source: &str, uid: &str, rid: &str, kind: &str) -> Result<String, Error> {
         let db = self.db.borrow();
+        if kind.starts_with("contact-") {
+            let mut q = db.prepare("SELECT '',payload,deleted FROM contacts WHERE book=?1 AND uid=?2").map_err(error)?;
+            let rows: Vec<(String, String, bool)> = q
+                .query_map(params![source, uid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(error)?
+                .collect::<Result<_, _>>()
+                .map_err(error)?;
+            return serde_json::to_string_pretty(&rows).map_err(error);
+        }
         let mut q = db
             .prepare("SELECT rid,payload,deleted FROM objects WHERE source=?1 AND uid=?2 AND (?3 OR rid=?4) ORDER BY rid")
             .map_err(error)?;
@@ -116,10 +127,10 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
             if current.revision != issue.revision {
                 return Err(error("The item changed. Refresh the issue before deciding."));
             }
-            if matches!(resolution, Resolution::RetryCreation) && issue.kind != "uncertain" {
+            if matches!(resolution, Resolution::RetryCreation) && !issue.kind.ends_with("uncertain") {
                 return Err(error("This item is not an uncertain creation"));
             }
-            if matches!(resolution, Resolution::KeepLocal) && (issue.kind == "uncertain" || issue.remote_deleted) {
+            if matches!(resolution, Resolution::KeepLocal) && (issue.kind.ends_with("uncertain") || issue.remote_deleted) {
                 return Err(error("Keep a local copy instead of overwriting a removed or uncertain item"));
             }
             self.db
@@ -129,6 +140,9 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
                     params![issue.source, issue.uid, issue.rid, format!("{resolution:?}"), issue.local, issue.remote],
                 )
                 .map_err(error)?;
+            if issue.kind.starts_with("contact-") {
+                return self.resolve_contact_issue(issue, resolution);
+            }
             let source = self
                 .source(&issue.source, Kind::Calendar)
                 .or_else(|| self.source(&issue.source, Kind::TaskList))
@@ -187,7 +201,7 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
                     self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",params![issue.source,issue.uid,issue.rid,issue.remote]).map_err(error)?;
                 }
             } else if !matches!(resolution, Resolution::RetryCreation) {
-                if issue.kind == "uncertain" && !matches!(resolution, Resolution::KeepOffline) {
+                if issue.kind.ends_with("uncertain") && !matches!(resolution, Resolution::KeepOffline) {
                     return Err(error("Check the provider, then retry explicitly or keep an offline copy"));
                 }
                 self.db
@@ -213,7 +227,7 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
                         self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",params![issue.source,issue.uid,issue.rid,issue.remote]).map_err(error)?;
                     }
                 }
-                if issue.remote_deleted || issue.kind == "uncertain" {
+                if issue.remote_deleted || issue.kind.ends_with("uncertain") {
                     self.db
                         .borrow()
                         .execute(

@@ -498,6 +498,39 @@ impl Calendar {
             self.registry.respond_api(&self.uid, uid, rid, emails, response)?;
             self.put(comp.ptr(), false)?;
         } else {
+            if source.backend == "dav" {
+                let account_id = source.account.as_ref().ok_or_else(|| error("Calendar has no account"))?;
+                let client = nyx_accounts_native::Client::connect().map_err(error)?;
+                let account = client
+                    .list()
+                    .map_err(error)?
+                    .into_iter()
+                    .find(|a| &a.id == account_id)
+                    .ok_or_else(|| error("Account not found"))?;
+                let endpoint = self
+                    .registry
+                    .db
+                    .borrow()
+                    .query_row("SELECT endpoint FROM api_endpoints WHERE source=?1", [&self.uid], |r| r.get::<_, String>(0))
+                    .ok()
+                    .or_else(|| account.endpoints.get("caldav").cloned())
+                    .ok_or_else(|| error("Configure a CalDAV endpoint"))?;
+                let secret = client.credential(account_id, nyx_accounts_native::Service::Calendar).map_err(error)?;
+                let remote = nyx_accounts_native::remote::Remote::new(account, secret)
+                    .map_err(error)?
+                    .for_service(nyx_accounts_native::Service::Calendar);
+                if !remote.dav_supports_scheduling(&endpoint).map_err(error)? {
+                    return Err(error(
+                        "This server does not advertise automatic invitation delivery. Respond using the provider’s calendar.",
+                    ));
+                }
+                let original = self.ics(uid, rid)?.replace("\r\n ", "").replace("\r\n\t", "").to_ascii_uppercase();
+                if original.contains("SCHEDULE-AGENT=CLIENT") || original.contains("SCHEDULE-AGENT=NONE") {
+                    return Err(error(
+                        "This invitation requires client-managed delivery. Respond using the provider’s calendar.",
+                    ));
+                }
+            }
             self.put(comp.ptr(), true)?;
         }
         Ok(true)
@@ -633,36 +666,69 @@ impl Calendar {
         Ok(result)
     }
     pub fn free_busy(&self, from: i64, to: i64, emails: &[String]) -> Result<Vec<Busy>, Error> {
+        if emails.is_empty() {
+            return Ok(Vec::new());
+        }
         let source = self.registry.source(&self.uid, self.kind).ok_or_else(|| error("Calendar not found"))?;
-        if source.backend != "google" {
-            return Err(error("This provider does not expose supported personal-account free/busy lookup"));
+        if !matches!(source.backend.as_str(), "google" | "dav") {
+            return Err(error("Free/busy lookup is not supported for personal Microsoft accounts or this local source"));
         }
         let account_id = source.account.ok_or_else(|| error("Calendar has no account"))?;
         let client = nyx_accounts_native::Client::connect().map_err(error)?;
         let account =
             client.list().map_err(error)?.into_iter().find(|a| a.id == account_id).ok_or_else(|| error("Account not found"))?;
         let secret = client.credential(&account_id, nyx_accounts_native::Service::Calendar).map_err(error)?;
-        let remote = nyx_accounts_native::remote::Remote::new(account, secret).map_err(error)?;
+        let remote = nyx_accounts_native::remote::Remote::new(account, secret)
+            .map_err(error)?
+            .for_service(nyx_accounts_native::Service::Calendar);
+        if from >= to || emails.len() > 64 {
+            return Err(error("Invalid free/busy range or attendee count"));
+        }
+        if source.backend == "dav" {
+            let endpoint = remote.account.endpoints.get("caldav").ok_or_else(|| error("Configure a CalDAV endpoint"))?;
+            let stamp = |t| {
+                chrono::DateTime::from_timestamp(t, 0)
+                    .map(|t| t.format("%Y%m%dT%H%M%SZ").to_string())
+                    .ok_or_else(|| error("Invalid time range"))
+            };
+            let responses = remote
+                .dav_free_busy(endpoint, &stamp(from)?, &stamp(to)?, &stamp(chrono::Utc::now().timestamp())?, emails)
+                .map_err(error)?;
+            let mut results = Vec::new();
+            for (email, payload) in responses {
+                let periods = read_free_busy(&payload, &email)?;
+                results.push((email, periods));
+            }
+            return Ok(results);
+        }
         let format =
             |t| chrono::DateTime::from_timestamp(t, 0).map(|t| t.to_rfc3339()).ok_or_else(|| error("Invalid time range"));
         let value=remote.json_write("https://www.googleapis.com/calendar/v3/freeBusy",reqwest::Method::POST,&serde_json::json!({"timeMin":format(from)?,"timeMax":format(to)?,"items":emails.iter().map(|id|serde_json::json!({"id":id})).collect::<Vec<_>>()}),None).map_err(error)?;
         let mut result = Vec::new();
         for email in emails {
-            let Some(calendar) = value.get("calendars").and_then(|v| v.get(email)) else { continue };
-            if calendar.get("errors").is_some() {
-                continue;
+            let calendar = value
+                .get("calendars")
+                .and_then(|v| v.get(email))
+                .ok_or_else(|| error("Availability data omitted a requested attendee"))?;
+            if calendar.get("errors").and_then(|v| v.as_array()).is_some_and(|errors| !errors.is_empty()) {
+                return Err(error("Availability is unavailable for a requested attendee"));
             }
             let mut periods = Vec::new();
-            if let Some(busy) = calendar.get("busy").and_then(|v| v.as_array()) {
-                for period in busy {
-                    if let (Some(start), Some(end)) = (period["start"].as_str(), period["end"].as_str()) {
-                        if let (Ok(start), Ok(end)) =
-                            (chrono::DateTime::parse_from_rfc3339(start), chrono::DateTime::parse_from_rfc3339(end))
-                        {
-                            periods.push((start.timestamp(), end.timestamp()));
-                        }
-                    }
+            let busy =
+                calendar.get("busy").and_then(|v| v.as_array()).ok_or_else(|| error("Invalid provider availability data"))?;
+            for period in busy {
+                let start = period["start"]
+                    .as_str()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .ok_or_else(|| error("Invalid busy period"))?;
+                let end = period["end"]
+                    .as_str()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .ok_or_else(|| error("Invalid busy period"))?;
+                if end <= start {
+                    return Err(error("Invalid busy period"));
                 }
+                periods.push((start.timestamp(), end.timestamp()));
             }
             result.push((email.clone(), periods));
         }
@@ -750,5 +816,35 @@ mod tests {
         let calendar = calendar();
         calendar.import("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:mixed-zone\r\nDTSTART;TZID=America/Chicago:20261030T090000\r\nDTEND;TZID=America/Chicago:20261030T100000\r\nRRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:mixed-zone\r\nRECURRENCE-ID:20261030T140000Z\r\nDTSTART:20261030T140000Z\r\nDTEND:20261030T150000Z\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n").unwrap();
         assert_eq!(calendar.instances(1793300000, 1793700000).len(), 1);
+    }
+}
+
+fn read_free_busy(payload: &str, email: &str) -> Result<Vec<(i64, i64)>, Error> {
+    let root = unsafe { Owned::new(sys::i_cal_component_new_from_string(cstring(payload).as_ptr())) }
+        .ok_or_else(|| error("Invalid availability data"))?;
+    let child = if unsafe { sys::i_cal_component_isa(root.ptr()) } == sys::I_CAL_VFREEBUSY_COMPONENT {
+        None
+    } else {
+        Some(
+            unsafe { Owned::new(sys::i_cal_component_get_first_component(root.ptr(), sys::I_CAL_VFREEBUSY_COMPONENT)) }
+                .ok_or_else(|| error("Scheduling response has no VFREEBUSY component"))?,
+        )
+    };
+    let component = child.as_ref().map(|c| c.ptr()).unwrap_or(root.ptr());
+    let (who, periods) = unsafe { ical::busy_periods(component) };
+    if !who.eq_ignore_ascii_case(email) {
+        return Err(error("Availability data did not match the requested attendee"));
+    }
+    Ok(periods)
+}
+#[cfg(test)]
+mod availability_tests {
+    #[test]
+    fn parses_periods_and_rejects_wrong_attendee() {
+        let payload = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VFREEBUSY\r\nATTENDEE:mailto:friend@example.test\r\nFREEBUSY:20261030T120000Z/20261030T130000Z\r\nFREEBUSY;FBTYPE=FREE:20261030T130000Z/20261030T140000Z\r\nEND:VFREEBUSY\r\nEND:VCALENDAR\r\n";
+        let periods = super::read_free_busy(payload, "friend@example.test").unwrap();
+        assert_eq!(periods.len(), 1);
+        assert_eq!(periods[0].1 - periods[0].0, 3600);
+        assert!(super::read_free_busy(payload, "other@example.test").is_err());
     }
 }

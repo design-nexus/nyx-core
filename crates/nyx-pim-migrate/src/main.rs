@@ -176,18 +176,20 @@ fn import(bundle: Bundle) -> Result<()> {
         let kind = if source.tasks { nyx_pim::Kind::TaskList } else { nyx_pim::Kind::Calendar };
         // Distinct source IDs keep imported snapshots separate from new accounts.
         let uid = format!("import:{}", source.uid);
-        registry.add_source(&nyx_pim::Source {
-            uid: uid.clone(),
-            name: format!("{} (imported)", source.name),
-            kind,
-            color: source.color,
-            selected: source.selected,
-            backend: "native".into(),
-            account: None,
-            group: Some("Imported snapshot".into()),
-            local: true,
-            writable: true,
-        })?;
+        if registry.source(&uid, kind).is_none() {
+            registry.add_source(&nyx_pim::Source {
+                uid: uid.clone(),
+                name: format!("{} (imported)", source.name),
+                kind,
+                color: source.color,
+                selected: source.selected,
+                backend: "native".into(),
+                account: None,
+                group: Some("Imported snapshot".into()),
+                local: true,
+                writable: true,
+            })?;
+        }
         let calendar = nyx_pim::Calendar::open(&registry, &uid, kind, None)?;
         for payload in source.payloads {
             calendar.import_all(&payload)?;

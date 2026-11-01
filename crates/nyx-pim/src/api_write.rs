@@ -361,7 +361,7 @@ impl Registry {
         let account =
             client.list().map_err(error)?.into_iter().find(|a| a.id == account_id).ok_or_else(|| error("Account not found"))?;
         let secret = client.credential(&account_id, nyx_accounts_native::Service::Calendar).map_err(error)?;
-        let remote = Remote::new(account, secret).map_err(error)?;
+        let remote = Remote::new(account, secret).map_err(error)?.for_service(nyx_accounts_native::Service::Calendar);
         let calendar = Calendar::open(self, source_id, Kind::Calendar, None)?;
         let resource = if let Some(rid) = rid {
             self.resolve_api_instance(source_id, &endpoint, &remote, &calendar, uid, rid)?

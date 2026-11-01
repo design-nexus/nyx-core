@@ -27,3 +27,5 @@ chrono-tz = "0.10"
 roxmltree = "0.21"
 
 html2text = "0.17"
+
+vcard-parser = { package = "ical", version = "0.11", default-features = false, features = ["vcard"] }

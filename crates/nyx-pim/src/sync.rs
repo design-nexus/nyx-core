@@ -25,7 +25,7 @@ impl Registry {
     fn refresh_account(&self, client: &Client, account: &nyx_accounts_native::Account, service: Service) -> Result<(), Error> {
         if matches!(account.provider.as_str(), "google" | "microsoft_personal") {
             let secret = client.credential(&account.id, service.clone()).map_err(error)?;
-            let remote = Remote::new(account.clone(), secret).map_err(error)?;
+            let remote = Remote::new(account.clone(), secret).map_err(error)?.for_service(service.clone());
             return self.sync_api(&remote, service.clone());
         }
         let contacts = service == Service::Contacts;
@@ -37,7 +37,7 @@ impl Registry {
             .cloned()
             .ok_or_else(|| error(format!("Configure the {key} endpoint in Online Accounts")))?;
         let secret = client.credential(&account.id, service.clone()).map_err(error)?;
-        let remote = Remote::new(account.clone(), secret).map_err(error)?;
+        let remote = Remote::new(account.clone(), secret).map_err(error)?.for_service(service.clone());
         let collections = remote.dav_collections(&endpoint, contacts).map_err(error)?;
         for collection in collections {
             if !contacts
@@ -50,22 +50,7 @@ impl Registry {
             let source_id = format!("{}:{}:{}", account.id, key, collection.url);
             let objects = remote.dav_list(&collection.url, contacts).map_err(error)?;
             if contacts {
-                contacts::initialize(self)?;
-                self.db
-                    .borrow()
-                    .execute(
-                        "INSERT INTO books(uid,name,account) VALUES(?1,?2,?3) ON CONFLICT(uid) DO UPDATE SET name=excluded.name",
-                        rusqlite::params![source_id, collection.name, account.id],
-                    )
-                    .map_err(error)?;
-                let mut seen = std::collections::HashSet::new();
-                for object in objects {
-                    for (uid, _) in contacts::parse_cards(&object.payload)? {
-                        seen.insert(uid);
-                    }
-                    contacts::import_vcards(self, &source_id, &collection.name, &object.payload)?;
-                }
-                contacts::reconcile(self, &source_id, &seen)?;
+                self.sync_contacts_dav(&remote, &source_id, &collection.name, &collection.url, objects)?;
             } else {
                 let source_id = format!("{source_id}:{kind:?}");
                 self.add_source(&Source {
@@ -80,6 +65,13 @@ impl Registry {
                     local: false,
                     writable: true,
                 })?;
+                self.db
+                    .borrow()
+                    .execute(
+                        "INSERT INTO api_endpoints VALUES(?1,?2) ON CONFLICT(source) DO UPDATE SET endpoint=excluded.endpoint",
+                        rusqlite::params![source_id, collection.url],
+                    )
+                    .map_err(error)?;
                 self.set_healthy(&source_id, false);
                 self.dav_merge(&source_id, kind, &remote, &collection.url, objects)?;
                 self.set_healthy(&source_id, true);
@@ -101,6 +93,7 @@ impl Registry {
         let calendar = Calendar::open(self, source, kind, None)?;
         let mut seen = std::collections::HashSet::new();
         for object in objects {
+            let snapshot = self.write_snapshot()?;
             let ids = calendar.import_all(&object.payload)?;
             for uid in ids {
                 seen.insert(uid.clone());
@@ -133,12 +126,14 @@ impl Registry {
                         &object.href,
                         false,
                     )?;
+                    snapshot.commit()?;
                     return Err(error(
                         "An online item changed while you edited it. Both versions are retained; resolve the conflict before uploading.",
                     ));
                 }
                 self.db.borrow().execute("INSERT INTO remote_resources VALUES(?1,?2,?3,?4) ON CONFLICT(source,uid) DO UPDATE SET href=excluded.href,etag=excluded.etag",rusqlite::params![source,uid,object.href,object.etag]).map_err(error)?;
             }
+            snapshot.commit()?;
         }
         let known: Vec<(String, String, Option<String>)> = {
             let db = self.db.borrow();
@@ -147,6 +142,7 @@ impl Registry {
         };
         for (uid, _, _) in &known {
             if !seen.contains(uid) {
+                let snapshot = self.write_snapshot()?;
                 let dirty: bool = self
                     .db
                     .borrow()
@@ -158,12 +154,14 @@ impl Registry {
                     .map_err(error)?;
                 if dirty {
                     self.record_issue(source, uid, "*", "dav", "", "", "", true)?;
+                    snapshot.commit()?;
                     return Err(error("An edited item was removed remotely. Your local edit is retained."));
                 }
                 self.db
                     .borrow()
                     .execute("UPDATE objects SET deleted=1 WHERE source=?1 AND uid=?2", rusqlite::params![source, uid])
                     .map_err(error)?;
+                snapshot.commit()?;
             }
         }
         let pending: Vec<String> = {

@@ -101,3 +101,10 @@ mod zones;
 
 mod issues;
 pub use issues::{Resolution, SyncIssue};
+
+mod contact_sync;
+
+mod history;
+pub use history::{HistoryDetail, HistorySummary, HistoryVersion};
+
+mod detach;

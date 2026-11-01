@@ -189,3 +189,50 @@ impl Registry {
         let _ = self.db.borrow().execute("UPDATE sources SET healthy=?2 WHERE uid=?1", rusqlite::params![uid, healthy]);
     }
 }
+
+/// A short write snapshot for merging a downloaded resource. Never held across network I/O.
+pub(crate) struct MergeSnapshot {
+    db: Rc<RefCell<Connection>>,
+    active: bool,
+}
+impl MergeSnapshot {
+    pub(crate) fn commit(mut self) -> Result<(), Error> {
+        self.db.borrow().execute_batch("RELEASE native_merge").map_err(error)?;
+        self.active = false;
+        Ok(())
+    }
+}
+impl Drop for MergeSnapshot {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.db.borrow().execute_batch("ROLLBACK TO native_merge; RELEASE native_merge");
+        }
+    }
+}
+impl Registry {
+    pub(crate) fn write_snapshot(&self) -> Result<MergeSnapshot, Error> {
+        self.db.borrow().execute_batch("SAVEPOINT native_merge").map_err(error)?;
+        let snapshot = MergeSnapshot { db: self.db.clone(), active: true };
+        let result = { self.db.borrow().execute("UPDATE sources SET healthy=healthy WHERE uid='system-calendar'", []) };
+        result.map_err(error)?;
+        Ok(snapshot)
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+    #[test]
+    fn failed_merge_lock_rolls_back_and_allows_a_later_edit() {
+        let path = std::env::temp_dir().join(format!("nyx-merge-{}", uuid::Uuid::new_v4())).join("pim.sqlite3");
+        let first = Registry::open(path.clone()).unwrap();
+        let second = Registry::open(path).unwrap();
+        second.db.borrow().busy_timeout(std::time::Duration::ZERO).unwrap();
+        let guard = first.write_snapshot().unwrap();
+        assert!(second.write_snapshot().is_err());
+        guard.commit().unwrap();
+        let next = second.write_snapshot().unwrap();
+        next.commit().unwrap();
+        assert!(second.db.borrow().is_autocommit());
+    }
+}

@@ -6,19 +6,40 @@ pub struct AddressBook {
     pub name: String,
     pub backend: String,
     pub enabled: bool,
+    pub writable: bool,
 }
 pub fn initialize(registry: &Registry) -> Result<(), Error> {
-    registry.db.borrow().execute_batch("CREATE TABLE IF NOT EXISTS books(uid TEXT PRIMARY KEY,name TEXT NOT NULL,account TEXT,enabled INTEGER NOT NULL DEFAULT 1); CREATE TABLE IF NOT EXISTS contacts(book TEXT NOT NULL REFERENCES books(uid),uid TEXT NOT NULL,payload TEXT NOT NULL,etag TEXT,dirty INTEGER DEFAULT 0,deleted INTEGER DEFAULT 0,PRIMARY KEY(book,uid));").map_err(error)
+    registry.db.borrow().execute_batch("CREATE TABLE IF NOT EXISTS books(uid TEXT PRIMARY KEY,name TEXT NOT NULL,account TEXT,enabled INTEGER NOT NULL DEFAULT 1); CREATE TABLE IF NOT EXISTS contacts(book TEXT NOT NULL REFERENCES books(uid),uid TEXT NOT NULL,payload TEXT NOT NULL,etag TEXT,dirty INTEGER DEFAULT 0,deleted INTEGER DEFAULT 0,PRIMARY KEY(book,uid));
+CREATE TABLE IF NOT EXISTS contact_resources(book TEXT,uid TEXT,remote_id TEXT,etag TEXT,PRIMARY KEY(book,uid));
+CREATE TABLE IF NOT EXISTS contact_baselines(book TEXT,uid TEXT,payload TEXT,raw TEXT,PRIMARY KEY(book,uid));
+CREATE TABLE IF NOT EXISTS contact_remote_versions(book TEXT,uid TEXT,raw TEXT,PRIMARY KEY(book,uid));
+CREATE TABLE IF NOT EXISTS contact_history(id INTEGER PRIMARY KEY,created TEXT DEFAULT CURRENT_TIMESTAMP,book TEXT,uid TEXT,payload TEXT,deleted INTEGER);").map_err(error)?;
+    let columns: Vec<String> = {
+        let db = registry.db.borrow();
+        let mut q = db.prepare("PRAGMA table_info(books)").map_err(error)?;
+        q.query_map([], |r| r.get(1)).map_err(error)?.collect::<Result<_, _>>().map_err(error)?
+    };
+    for (name, definition) in
+        [("backend", "TEXT NOT NULL DEFAULT 'native'"), ("endpoint", "TEXT"), ("writable", "INTEGER NOT NULL DEFAULT 1")]
+    {
+        if !columns.iter().any(|column| column == name) {
+            registry.db.borrow().execute_batch(&format!("ALTER TABLE books ADD COLUMN {name} {definition}")).map_err(error)?;
+        }
+    }
+    Ok(())
 }
 pub fn list_address_books() -> Result<Vec<AddressBook>, Error> {
     let registry = Registry::connect()?;
     initialize(&registry)?;
     let books: Vec<(AddressBook, Option<String>)> = {
         let db = registry.db.borrow();
-        let mut query = db.prepare("SELECT uid,name,enabled,account FROM books ORDER BY name").map_err(error)?;
+        let mut query = db.prepare("SELECT uid,name,enabled,account,backend,(writable AND (account IS NULL OR backend<>'native')) FROM books ORDER BY name").map_err(error)?;
         query
             .query_map([], |r| {
-                Ok((AddressBook { uid: r.get(0)?, name: r.get(1)?, enabled: r.get(2)?, backend: "native".into() }, r.get(3)?))
+                Ok((
+                    AddressBook { uid: r.get(0)?, name: r.get(1)?, enabled: r.get(2)?, backend: r.get(4)?, writable: r.get(5)? },
+                    r.get(3)?,
+                ))
             })
             .map_err(error)?
             .map(|r| r.map_err(error))
@@ -52,7 +73,7 @@ pub fn list_vcards(uid: &str) -> Result<Vec<String>, Error> {
 pub fn import_vcards(registry: &Registry, book: &str, name: &str, cards: &str) -> Result<usize, Error> {
     initialize(registry)?;
     let mut db = registry.db.borrow_mut();
-    let tx = db.transaction().map_err(error)?;
+    let tx = db.savepoint().map_err(error)?;
     tx.execute("INSERT INTO books(uid,name) VALUES(?1,?2) ON CONFLICT(uid) DO NOTHING", rusqlite::params![book, name])
         .map_err(error)?;
     let parsed = parse_cards(cards)?;
@@ -80,13 +101,7 @@ pub(crate) fn parse_cards(text: &str) -> Result<Vec<(String, String)>, Error> {
             if line.eq_ignore_ascii_case("END:VCARD") {
                 let lines = current.take().unwrap();
                 let payload = lines.join("\r\n") + "\r\n";
-                let unfolded = payload.replace("\r\n ", "").replace("\r\n\t", "");
-                let uid = unfolded
-                    .lines()
-                    .filter_map(|s| s.split_once(':'))
-                    .find(|(key, _)| key.eq_ignore_ascii_case("UID"))
-                    .map(|(_, value)| value.to_owned())
-                    .ok_or_else(|| error("A vCard without UID cannot be safely reconciled"))?;
+                let uid = crate::contact_sync::uid_of(&payload)?;
                 result.push((uid, payload));
             }
         }
@@ -142,4 +157,18 @@ pub(crate) fn reconcile(registry: &Registry, book: &str, seen: &std::collections
         }
     }
     Ok(())
+}
+
+/// Queue one edited card, rejecting an editor whose raw snapshot is stale.
+pub fn save_vcard(book: &str, payload: &str, expected: Option<&str>) -> Result<(), Error> {
+    crate::contact_sync::queue_save(&Registry::connect()?, book, payload, expected)
+}
+/// Queue explicit deletions against the exact cards reviewed by the user.
+pub fn delete_vcards(book: &str, expected: &[(String, String)]) -> Result<(), Error> {
+    crate::contact_sync::queue_delete(&Registry::connect()?, book, expected)
+}
+
+/// Keep raw properties the existing editor did not change.
+pub fn merge_editor_changes(raw: &str, before: &str, after: &str) -> Result<String, Error> {
+    crate::contact_sync::merge_editor(raw, before, after)
 }

@@ -235,7 +235,7 @@ fn graph_rule(recurrence: &Value, all_day: bool, zone: Option<&str>) -> Option<S
     }
     Some(format!("RRULE:{}", parts.join(";")))
 }
-fn card(value: &Value, google: bool) -> Option<String> {
+pub(crate) fn card(value: &Value, google: bool) -> Option<String> {
     let uid = text(value, if google { "resourceName" } else { "id" });
     if uid.is_empty() {
         return None;
@@ -249,13 +249,24 @@ fn card(value: &Value, google: bool) -> Option<String> {
         vec!["BEGIN:VCARD".into(), "VERSION:3.0".into(), format!("UID:{}", escape(&uid)), format!("FN:{}", escape(&name))];
     if let Some(emails) = value.get("emailAddresses").and_then(Value::as_array) {
         for email in emails {
-            property(&mut lines, "EMAIL", &text(email, if google { "value" } else { "address" }));
+            let kind = if google { text(email, "type") } else { String::new() };
+            let kind: String = kind.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+            property(
+                &mut lines,
+                &if kind.is_empty() { "EMAIL".into() } else { format!("EMAIL;TYPE={kind}") },
+                &text(email, if google { "value" } else { "address" }),
+            );
         }
     }
     if google {
         if let Some(phones) = value.get("phoneNumbers").and_then(Value::as_array) {
             for phone in phones {
-                property(&mut lines, "TEL", &text(phone, "value"));
+                let kind: String = text(phone, "type").chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                property(
+                    &mut lines,
+                    &if kind.is_empty() { "TEL".into() } else { format!("TEL;TYPE={kind}") },
+                    &text(phone, "value"),
+                );
             }
         }
     } else {
@@ -291,7 +302,12 @@ fn card(value: &Value, google: bool) -> Option<String> {
         }
         if let Some(urls) = value["urls"].as_array() {
             for url in urls {
-                property(&mut lines, "URL", &text(url, "value"));
+                let kind: String = text(url, "type").chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+                property(
+                    &mut lines,
+                    &if kind.is_empty() { "URL".into() } else { format!("URL;TYPE={kind}") },
+                    &text(url, "value"),
+                );
             }
         }
         if let Some(addresses) = value["addresses"].as_array() {
@@ -358,26 +374,7 @@ impl Registry {
         let google = remote.account.provider == "google";
         self.db.borrow().execute_batch("CREATE TABLE IF NOT EXISTS provider_payloads(account TEXT,kind TEXT,id TEXT,data TEXT,PRIMARY KEY(account,kind,id));").map_err(error)?;
         if service == Service::Contacts {
-            let values = remote.list(service).map_err(error)?;
-            let book = format!("{}:contacts", remote.account.id);
-            contacts::initialize(self)?;
-            self.db.borrow().execute("INSERT INTO books(uid,name,account) VALUES(?1,?2,?3) ON CONFLICT(uid) DO UPDATE SET name=excluded.name,account=excluded.account",rusqlite::params![book,remote.account.label(),remote.account.id]).map_err(error)?;
-            let mut seen = std::collections::HashSet::new();
-            for value in values {
-                let id = text(&value, if google { "resourceName" } else { "id" });
-                if id.is_empty() {
-                    return Err(error("Provider returned a contact without identity; cached contacts were retained"));
-                }
-                self.save_api_payload(&remote.account.id, "contact", &id, &value)?;
-                if let Some(card) = card(&value, google) {
-                    for (uid, _) in contacts::parse_cards(&card)? {
-                        seen.insert(uid);
-                    }
-                    contacts::import_vcards(self, &book, remote.account.label(), &card)?;
-                }
-            }
-            contacts::reconcile(self, &book, &seen)?;
-            return Ok(());
+            return self.sync_contacts_api(remote);
         }
         if service == Service::Tasks {
             for list in remote.list(Service::Tasks).map_err(error)? {
@@ -415,6 +412,7 @@ impl Registry {
                 let calendar = Calendar::open(self, &source_id, Kind::TaskList, None)?;
                 let mut seen = std::collections::HashSet::new();
                 for task in pages(remote, endpoint.as_str(), if google { "items" } else { "value" })? {
+                    let snapshot = self.write_snapshot()?;
                     let id = text(&task, "id");
                     seen.insert(id.clone());
                     self.save_api_payload(&remote.account.id, "task", &id, &task)?;
@@ -490,11 +488,13 @@ impl Registry {
                         .map_err(error)?;
                     if dirty && self.api_resource(&source_id, uid, "").is_some_and(|(_, old)| old != etag) {
                         self.record_issue(&source_id, uid, "", "api", &payload, &etag, &id, false)?;
+                        snapshot.commit()?;
                         return Err(error("Online task changed while you edited it; your local edit is retained"));
                     }
                     calendar.import_all(&payload)?;
                     self.save_api_resource(&source_id, uid, "", &id, &etag)?;
                     self.db.borrow().execute("INSERT INTO api_baselines VALUES(?1,?2,'',?3) ON CONFLICT(source,uid,rid) DO UPDATE SET payload=excluded.payload",rusqlite::params![source_id,uid,payload]).map_err(error)?;
+                    snapshot.commit()?;
                 }
                 let known: Vec<(String, String)> = {
                     let db = self.db.borrow();
@@ -508,6 +508,7 @@ impl Registry {
                 };
                 for (uid, id) in known {
                     if !seen.contains(&id) {
+                        let snapshot = self.write_snapshot()?;
                         let dirty: bool = self
                             .db
                             .borrow()
@@ -519,6 +520,7 @@ impl Registry {
                             .map_err(error)?;
                         if dirty {
                             self.record_issue(&source_id, &uid, "*", "api", "", "", &id, true)?;
+                            snapshot.commit()?;
                             return Err(error("An edited task was removed remotely. Your local edit is retained."));
                         }
                         self.db
@@ -528,6 +530,7 @@ impl Registry {
                                 rusqlite::params![source_id, uid],
                             )
                             .map_err(error)?;
+                        snapshot.commit()?;
                     }
                 }
                 self.upload_api_tasks(&source_id, endpoint.as_str(), remote)?;
@@ -584,6 +587,7 @@ impl Registry {
                 values.iter().filter_map(|v| v["id"].as_str().map(str::to_owned)).collect();
             let mut projection_failed = false;
             for value in values {
+                let snapshot = self.write_snapshot()?;
                 self.save_api_payload(&remote.account.id, "event", &text(&value, "id"), &value)?;
                 if google && value["status"].as_str() == Some("cancelled") {
                     let remote_id = text(&value, "id");
@@ -643,6 +647,7 @@ impl Registry {
                                     false,
                                 )?;
                             }
+                            snapshot.commit()?;
                             return Err(error("A locally edited event was cancelled remotely; your edit is retained"));
                         }
                         if rid.is_empty() {
@@ -675,6 +680,7 @@ impl Registry {
                             }
                         }
                     }
+                    snapshot.commit()?;
                     continue;
                 }
                 let mut projected = value.clone();
@@ -730,6 +736,7 @@ impl Registry {
                         .map_err(error)?;
                     if dirty && self.api_resource(&source_id, uid, rid).is_some_and(|(_, previous)| previous != etag) {
                         self.record_issue(&source_id, uid, rid, "api", &payload, &etag, &remote_id, false)?;
+                        snapshot.commit()?;
                         return Err(error("Online event changed while you edited it. Both versions are retained."));
                     }
                     calendar.import_all(&payload)?;
@@ -738,6 +745,7 @@ impl Registry {
                 } else {
                     projection_failed = true;
                 }
+                snapshot.commit()?;
             }
             if projection_failed {
                 return Err(error(
@@ -751,6 +759,7 @@ impl Registry {
             };
             for (uid, remote_id) in known {
                 if !seen.contains(&remote_id) {
+                    let snapshot = self.write_snapshot()?;
                     let dirty: bool = self
                         .db
                         .borrow()
@@ -762,6 +771,7 @@ impl Registry {
                         .map_err(error)?;
                     if dirty {
                         self.record_issue(&source_id, &uid, "*", "api", "", "", &remote_id, true)?;
+                        snapshot.commit()?;
                         return Err(error("An edited event was removed remotely. Your local edit is retained."));
                     }
                     self.db
@@ -771,6 +781,7 @@ impl Registry {
                             rusqlite::params![source_id, uid],
                         )
                         .map_err(error)?;
+                    snapshot.commit()?;
                 }
             }
             self.upload_api_calendar(&source_id, endpoint.as_str(), remote)?;
