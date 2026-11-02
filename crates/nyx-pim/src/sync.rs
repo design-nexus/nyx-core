@@ -9,6 +9,12 @@ impl Registry {
         let client = Client::connect().map_err(error)?;
         let mut failures = Vec::new();
         for account in client.list().map_err(error)?.into_iter().filter(|a| a.enabled.contains(&service)) {
+            if matches!(account.status.as_str(), "needs_sign_in" | "authorizing" | "removing") {
+                self.db.borrow().execute(
+                    "UPDATE sources SET healthy=0 WHERE json_extract(data,'$.account')=?1", [&account.id],
+                ).map_err(error)?;
+                continue;
+            }
             if let Err(failure) = self.refresh_account(&client, &account, service.clone()) {
                 let _ = self
                     .db
