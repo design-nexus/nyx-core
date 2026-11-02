@@ -166,7 +166,10 @@ fn import(bundle: Bundle) -> Result<()> {
         let client = nyx_accounts_native::Client::connect()?;
         let existing = client.list()?;
         for account in bundle.accounts {
-            if !existing.iter().any(|a| a.legacy_id == account.legacy_id) {
+            if !existing.iter().any(|a| {
+                (account.legacy_id.is_some() && a.legacy_id == account.legacy_id)
+                    || (a.provider == account.provider && a.identity.eq_ignore_ascii_case(&account.identity))
+            }) {
                 client.register(&account)?;
             }
         }
