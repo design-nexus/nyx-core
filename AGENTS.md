@@ -2,7 +2,8 @@
 
 Libraries: application foundation, GOA accounts and EDS discovery (nyx-accounts),
 EDS calendars and task lists (nyx-eds over generated crates/eds/*-sys), natural-language
-dates (nyx-when) and provider-independent WebDAV sync. No UI, helper binary, or
+dates (nyx-when), provider-independent WebDAV sync and desktop state for the Nyx desktop
+apps (nyx-desktop: Hyprland, Omarchy workspace modes, panel coordination). No UI, helper binary, or
 application internals are extracted. Regenerate FFI with tools/gen-eds.sh only when the
 EDS version changes; run tools/test-eds.sh after nyx-eds changes. Tokens stay behind
 nyx-accounts' `credentials` feature (docs/online-accounts/SECURITY.md).
@@ -14,7 +15,7 @@ Keep application names, IDs, paths, D-Bus interfaces, and data formats stable.
 Use canonical STYLE.md from the pinned nyx-design dependency. Reuse existing
 widgets, theme tokens, icons, and shortcuts. Media Player defines video controls.
 Run essential targeted checks only. Do not download models or run inference for
-routine verification. Install app updates without opening/restarting them.
+routine verification. Install app updates without opening/restarting them. Restarting background services after installation is allowed.
 Common guidance: https://github.com/design-nexus/nyx/blob/main/docs/AGENTS_COMMON.md
 This file carries the essential common rules so offline work remains possible.
 
