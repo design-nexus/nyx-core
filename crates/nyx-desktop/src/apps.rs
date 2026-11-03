@@ -59,6 +59,14 @@ impl Index {
         Index { keys }
     }
 
+    /// Every window class (lower case) that maps to desktop id `id`, for a window rule
+    /// that matches the app's windows.
+    pub fn classes_of(&self, id: &str) -> Vec<String> {
+        let mut out: Vec<String> = self.keys.iter().filter(|(_, v)| v.eq_ignore_ascii_case(id)).map(|(k, _)| k.clone()).collect();
+        out.sort();
+        out
+    }
+
     /// The desktop id for a window class, if an installed app claims it.
     pub fn find(&self, class: &str) -> Option<&str> {
         self.keys.get(&class.to_lowercase()).map(String::as_str)
@@ -125,6 +133,7 @@ mod tests {
         assert_eq!(idx.find("TUI.btop"), Some("btop"), "--app-id");
         assert_eq!(idx.find("alacritty"), Some("Alacritty"), "case doesn't matter");
         assert_eq!(idx.find("kitty"), None);
+        assert_eq!(idx.classes_of("org.mozilla.firefox"), ["firefox", "org.mozilla.firefox"]);
     }
 
     #[test]

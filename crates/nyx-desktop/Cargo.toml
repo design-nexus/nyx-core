@@ -11,6 +11,7 @@ repository.workspace = true
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
 async-channel = { version = "2", optional = true }
 gio = { version = "0.22", optional = true }
 glib = { version = "0.22", optional = true }

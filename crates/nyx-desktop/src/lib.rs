@@ -10,6 +10,7 @@
 //! - [`apps`]: which installed app a window belongs to (grouping by desktop id).
 //! - [`actions`]: focus, close, float, move: Hyprland dispatchers for one window.
 //! - `capture` (`capture` feature): window thumbnails over `ext-image-copy-capture`.
+//! - [`profiles`]: workspace profiles, named sets of workspaces and app placements.
 //! - [`omarchy`]: Omarchy's per-workspace mode (tiling, scrolling, floating).
 //! - `panel` (`glib` feature): keeps the Control Center and Notification Center
 //!   mutually exclusive over D-Bus.
@@ -27,6 +28,7 @@ pub mod model;
 pub mod omarchy;
 #[cfg(feature = "glib")]
 pub mod panel;
+pub mod profiles;
 pub mod watch;
 
 pub use model::{Desktop, Monitor, USER_WORKSPACES, Window, Workspace, is_user_workspace};
