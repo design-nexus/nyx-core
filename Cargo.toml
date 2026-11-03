@@ -15,6 +15,7 @@ members = [
   "crates/nyx-pim",
   "crates/nyx-pim-migrate",
   "crates/nyx-when",
+  "crates/nyx-peer",
 ]
 
 [workspace.package]

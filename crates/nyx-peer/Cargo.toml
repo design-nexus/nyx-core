@@ -1,0 +1,13 @@
+[package]
+name = "nyx-peer"
+version = "0.1.0"
+description = "Which Nyx program a local caller runs, for services that trust callers by program"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

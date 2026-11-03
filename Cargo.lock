@@ -1951,6 +1951,13 @@ name = "nyx-libxml2-sys"
 version = "0.1.0"
 
 [[package]]
+name = "nyx-peer"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "nyx-pim"
 version = "0.1.0"
 dependencies = [
