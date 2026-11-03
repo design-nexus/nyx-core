@@ -8,16 +8,18 @@ authors.workspace = true
 repository.workspace = true
 
 [features]
-testutil = []
+default = ["sync"]
+sync = ["dep:age", "dep:reqwest", "dep:serde", "dep:serde_json", "dep:url", "dep:uuid"]
+testutil = ["sync"]
 
 [dependencies]
-age = "0.11"
+age = { version = "0.11", optional = true }
 anyhow = "1.0.104"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-url = "2"
-uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+serde_json = { version = "1.0.151", optional = true }
+url = { version = "2", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
 
 [dev-dependencies]
 serde_json = "1.0.151"
