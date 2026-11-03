@@ -1,7 +1,7 @@
 [package]
 name = "nyx-desktop"
 version = "0.1.0"
-description = "Shared desktop state for the Nyx desktop apps: Hyprland, workspaces, Omarchy modes, panels"
+description = "Shared desktop state for the Nyx desktop apps: Hyprland, workspaces, Omarchy modes, panels, app matching, window actions and thumbnails"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -14,12 +14,17 @@ serde_json = "1"
 async-channel = { version = "2", optional = true }
 gio = { version = "0.22", optional = true }
 glib = { version = "0.22", optional = true }
+gio-unix = { version = "0.22", optional = true }
+wayland-client = { version = "0.31", optional = true }
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
 
 [features]
 # `glib` adds the main-loop bridge (`watch_local`) and panel coordination over D-Bus.
 # Without it the crate is plain std: a daemon or a test can use the model and watcher.
 default = ["glib"]
-glib = ["dep:glib", "dep:gio", "dep:async-channel"]
+glib = ["dep:glib", "dep:gio", "dep:gio-unix", "dep:async-channel"]
+# Window thumbnails (`capture`): wayland-client and the ext capture protocols.
+capture = ["dep:wayland-client", "dep:wayland-protocols"]
 
 [[example]]
 name = "watch"
