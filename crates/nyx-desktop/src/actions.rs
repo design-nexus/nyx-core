@@ -61,10 +61,7 @@ pub fn raise(address: &str) -> Dispatch {
 
 /// Ask a window to close (the app may still ask about unsaved work).
 pub fn close_window(address: &str) -> Dispatch {
-    Dispatch::new(
-        format!("hl.dsp.window.close({{ {} }})", target(address)),
-        format!("closewindow address:0x{address}"),
-    )
+    Dispatch::new(format!("hl.dsp.window.close({{ {} }})", target(address)), format!("closewindow address:0x{address}"))
 }
 
 /// Switch a window between floating and tiled.
@@ -73,6 +70,36 @@ pub fn toggle_floating(address: &str) -> Dispatch {
         format!("hl.dsp.window.float({{ action = \"toggle\", {} }})", target(address)),
         format!("togglefloating address:0x{address}"),
     )
+}
+
+/// Maximize a window, or bring it back to its own size. The classic form acts on the
+/// focused window, which is the one whose button was pressed.
+pub fn toggle_maximized(address: &str) -> Dispatch {
+    Dispatch::new(
+        format!("hl.dsp.window.fullscreen({{ mode = \"maximized\", action = \"toggle\", {} }})", target(address)),
+        "fullscreen 1".into(),
+    )
+}
+
+/// Add a tag to a window (`on`), or take it off. Window rules can match tags.
+pub fn tag(address: &str, tag: &str, on: bool) -> Dispatch {
+    let sign = if on { '+' } else { '-' };
+    Dispatch::new(
+        format!("hl.dsp.window.tag({{ tag = \"{sign}{tag}\", {} }})", target(address)),
+        format!("tagwindow {sign}{tag} address:0x{address}"),
+    )
+}
+
+/// Minimize a window through Omarchy, which keeps it on [`MINIMIZED`] for the dock to
+/// bring back. Omarchy only minimizes on floating workspaces.
+pub fn minimize(address: &str) -> bool {
+    std::process::Command::new("omarchy-hyprland-window-minimize")
+        .arg(format!("0x{address}"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
 }
 
 /// Move a window to a workspace (an id, `name:…` or `special:…`); `follow` also takes
@@ -149,5 +176,14 @@ mod tests {
         assert_eq!(move_to_workspace("1f", "4", true).classic, "movetoworkspace 4,address:0x1f");
         assert_eq!(move_to_monitor("1f", "DP-1").classic, "movewindow mon:DP-1,address:0x1f");
         assert_eq!(leave_group("1f").lua, "hl.dsp.window.move({ out_of_group = true, window = \"address:0x1f\" })");
+        assert_eq!(
+            toggle_maximized("1f").lua,
+            "hl.dsp.window.fullscreen({ mode = \"maximized\", action = \"toggle\", window = \"address:0x1f\" })"
+        );
+        assert_eq!(
+            tag("1f", "nyx-own-controls", true).lua,
+            "hl.dsp.window.tag({ tag = \"+nyx-own-controls\", window = \"address:0x1f\" })"
+        );
+        assert_eq!(tag("1f", "x", false).classic, "tagwindow -x address:0x1f");
     }
 }

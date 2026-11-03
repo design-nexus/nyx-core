@@ -8,7 +8,8 @@
 //!   and hands out [`watch::Update`]s. With the `glib` feature, [`watch::watch_local`]
 //!   delivers them on the GTK main loop.
 //! - [`apps`]: which installed app a window belongs to (grouping by desktop id).
-//! - [`actions`]: focus, close, float, move: Hyprland dispatchers for one window.
+//! - [`actions`]: focus, close, float, maximize, minimize, tag, move: Hyprland
+//!   dispatchers for one window.
 //! - `capture` (`capture` feature): window thumbnails over `ext-image-copy-capture`.
 //! - [`profiles`]: workspace profiles, named sets of workspaces and app placements.
 //! - [`omarchy`]: Omarchy's per-workspace mode (tiling, scrolling, floating).
