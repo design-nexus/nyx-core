@@ -42,6 +42,9 @@ pub enum Event {
     MonitorAdded { name: String },
     /// `monitorremovedv2>>ID,NAME,DESCRIPTION`
     MonitorRemoved { name: String },
+    /// `togglegroup>>0|1,ADDRESSES`, `moveintogroup>>ADDRESS`, `moveoutofgroup>>ADDRESS`:
+    /// a window group (tabs) was made, broken up, joined or left.
+    Group,
     /// `configreloaded>>`
     ConfigReloaded,
     /// Anything else, kept for logging.
@@ -117,6 +120,7 @@ impl Event {
             "monitoraddedv2" => Event::MonitorAdded { name: f(3).get(1)?.clone() },
             "monitorremovedv2" => Event::MonitorRemoved { name: f(3).get(1)?.clone() },
             "configreloaded" => Event::ConfigReloaded,
+            "togglegroup" | "moveintogroup" | "moveoutofgroup" => Event::Group,
             _ => return None,
         })
     }
@@ -132,6 +136,7 @@ impl Event {
                 | Event::Floating { .. }
                 | Event::Fullscreen { .. }
                 | Event::MoveWorkspace { .. }
+                | Event::Group
                 | Event::ConfigReloaded
         )
     }

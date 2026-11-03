@@ -93,6 +93,14 @@ pub fn move_to_monitor(address: &str, monitor: &str) -> Dispatch {
     )
 }
 
+/// Take a window out of its group (tabs); it tiles beside the group.
+pub fn leave_group(address: &str) -> Dispatch {
+    Dispatch::new(
+        format!("hl.dsp.window.move({{ out_of_group = true, {} }})", target(address)),
+        format!("moveoutofgroup address:0x{address}"),
+    )
+}
+
 /// What to run to bring a window to the user: restore it if minimized (to the
 /// workspace in front of the user, `current`), then focus and raise it.
 pub fn activate(address: &str, minimized: bool, current: i64) -> Vec<Dispatch> {
@@ -140,5 +148,6 @@ mod tests {
         assert_eq!(toggle_floating("1f").classic, "togglefloating address:0x1f");
         assert_eq!(move_to_workspace("1f", "4", true).classic, "movetoworkspace 4,address:0x1f");
         assert_eq!(move_to_monitor("1f", "DP-1").classic, "movewindow mon:DP-1,address:0x1f");
+        assert_eq!(leave_group("1f").lua, "hl.dsp.window.move({ out_of_group = true, window = \"address:0x1f\" })");
     }
 }

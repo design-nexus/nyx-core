@@ -113,6 +113,9 @@ pub struct Window {
     pub pinned: bool,
     pub hidden: bool,
     pub urgent: bool,
+    /// The windows of its Hyprland group (tabs), in group order, itself included; empty
+    /// when it isn't in a group. The visible tab is the one that isn't `hidden`.
+    pub grouped: Vec<String>,
 }
 
 impl Window {
@@ -267,6 +270,7 @@ impl Desktop {
                             pinned: false,
                             hidden: false,
                             urgent: false,
+                            grouped: Vec::new(),
                         },
                     );
                 }
@@ -357,6 +361,7 @@ impl Desktop {
                 c.monitors = true;
             }
             Event::ConfigReloaded => c = Changes::ALL,
+            Event::Group => c.windows = true,
             Event::Other { .. } => {}
         }
         c
@@ -524,6 +529,8 @@ struct RawClient {
     fullscreen: u8,
     #[serde(rename = "focusHistoryID")]
     focus_history_id: i32,
+    #[serde(default)]
+    grouped: Vec<String>,
 }
 
 impl From<RawClient> for Window {
@@ -545,6 +552,7 @@ impl From<RawClient> for Window {
             pinned: r.pinned,
             hidden: r.hidden,
             urgent: false,
+            grouped: r.grouped.iter().map(|a| address(a)).collect(),
         }
     }
 }
@@ -586,6 +594,25 @@ mod tests {
         assert_eq!(d.windows[0].address, "55ef7100a730");
         assert_eq!(d.windows[0].stable_id, "18000369");
         assert_eq!(d.active_window.as_deref(), Some("55ef7100a730"));
+    }
+
+    #[test]
+    fn reads_window_groups() {
+        let json = r#"[
+            {"address":"0xA1","stableId":"1","mapped":true,"hidden":false,"at":[0,0],"size":[1,1],
+             "workspace":{"id":1,"name":"1"},"floating":false,"pinned":false,"monitor":0,"class":"a",
+             "title":"","initialClass":"a","pid":1,"fullscreen":0,"focusHistoryID":0,"grouped":["0xA1","0xB2"]},
+            {"address":"0xB2","stableId":"2","mapped":true,"hidden":true,"at":[0,0],"size":[1,1],
+             "workspace":{"id":1,"name":"1"},"floating":false,"pinned":false,"monitor":0,"class":"b",
+             "title":"","initialClass":"b","pid":2,"fullscreen":0,"focusHistoryID":1}
+        ]"#;
+        let clients: Vec<RawClient> = serde_json::from_str(json).unwrap();
+        let mut d = Desktop::default();
+        d.set_windows(clients, None);
+        assert_eq!(d.windows[0].grouped, ["a1", "b2"]);
+        assert!(d.windows[1].grouped.is_empty(), "missing means not grouped");
+        assert!(Event::parse("moveintogroup>>a1").needs_windows());
+        assert!(Event::parse("togglegroup>>1,a1,b2").needs_windows());
     }
 
     #[test]
