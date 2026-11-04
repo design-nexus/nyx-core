@@ -96,6 +96,12 @@ pub fn list_task_lists() -> Result<Vec<Source>, Error> {
     list_kind(Kind::TaskList)
 }
 
+/// The session bus; without one (a build machine, a bare console) there's no Evolution
+/// data server either.
+fn session_bus() -> Result<gio::DBusConnection, Error> {
+    gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).map_err(|_| Error::Unavailable)
+}
+
 pub fn list_mail_accounts() -> Result<Vec<Source>, Error> {
     list_kind(Kind::MailAccount)
 }
@@ -106,7 +112,7 @@ fn list_kind(kind: Kind) -> Result<Vec<Source>, Error> {
 }
 
 fn managed_objects() -> Result<glib::Variant, Error> {
-    let conn = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).map_err(|e| map_gio_error(&e))?;
+    let conn = session_bus()?;
     let ty = glib::VariantTy::new("(a{oa{sa{sv}}})").expect("type");
     let reply = conn
         .call_sync(
@@ -129,7 +135,7 @@ pub fn list_vcards(uid: &str) -> Result<Vec<String>, Error> {
     if uid.is_empty() || uid.contains('/') {
         return Err(Error::Other("That address book isn't here.".into()));
     }
-    let conn = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).map_err(|e| map_gio_error(&e))?;
+    let conn = session_bus()?;
     let open_ty = glib::VariantTy::new("(ss)").expect("type");
     let params = glib::Variant::tuple_from_iter([uid.to_variant()]);
     let opened = conn
