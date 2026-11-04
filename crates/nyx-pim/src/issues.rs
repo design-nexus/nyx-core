@@ -25,6 +25,8 @@ pub enum Resolution {
     RetryCreation,
 }
 
+/// A `sync_issues` row: source, uid, rid, kind, payload, etag, remote id, deleted.
+type IssueRow = (String, String, String, String, String, String, String, bool);
 impl Registry {
     pub(crate) fn sync_lock(&self) -> Result<File, Error> {
         let path = self.db.borrow().path().map(std::path::PathBuf::from).ok_or_else(|| error("Store path unavailable"))?;
@@ -47,6 +49,7 @@ CREATE TABLE IF NOT EXISTS remote_resources(source TEXT,uid TEXT,href TEXT,etag 
 CREATE TABLE IF NOT EXISTS uncertain_creates(source TEXT,uid TEXT,PRIMARY KEY(source,uid));
 CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEXT DEFAULT CURRENT_TIMESTAMP,source TEXT,uid TEXT,rid TEXT,decision TEXT,local TEXT,remote TEXT);").map_err(error)
     }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_issue(
         &self,
         source: &str,
@@ -64,7 +67,7 @@ CREATE TABLE IF NOT EXISTS resolution_history(id INTEGER PRIMARY KEY,created TEX
     }
     pub fn sync_issues(&self) -> Result<Vec<SyncIssue>, Error> {
         self.issues_schema()?;
-        let records: Vec<(String, String, String, String, String, String, String, bool)> = {
+        let records: Vec<IssueRow> = {
             let db = self.db.borrow();
             let mut q=db.prepare("SELECT source,uid,rid,kind,payload,etag,remote_id,deleted FROM sync_issues UNION ALL SELECT source,uid,'',CASE WHEN EXISTS(SELECT 1 FROM books WHERE books.uid=uncertain_creates.source) THEN 'contact-uncertain' ELSE 'uncertain' END,'','','',0 FROM uncertain_creates WHERE NOT EXISTS(SELECT 1 FROM sync_issues s WHERE s.source=uncertain_creates.source AND s.uid=uncertain_creates.uid) ORDER BY source,uid,rid").map_err(error)?;
             q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))
@@ -378,9 +381,8 @@ mod tests {
         r.resolve_sync_issue(&issue, Resolution::RetryCreation).unwrap();
         assert_eq!(r.sync_issues().unwrap().len(), 1);
         assert_eq!(r.sync_issues().unwrap()[0].uid, "another");
-        assert_eq!(
-            r.db.borrow().query_row("SELECT dirty FROM objects WHERE uid='item'", [], |row| row.get::<_, bool>(0)).unwrap(),
-            true
+        assert!(
+            r.db.borrow().query_row("SELECT dirty FROM objects WHERE uid='item'", [], |row| row.get::<_, bool>(0)).unwrap()
         );
     }
     #[test]

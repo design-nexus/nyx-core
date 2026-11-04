@@ -130,8 +130,8 @@ fn collect(registry: &Registry, now: i64) -> Vec<Reminder> {
         query.query_map([now], |r| r.get(0)).map(|r| r.filter_map(Result::ok).collect()).unwrap_or_default()
     };
     for data in snoozed {
-        if let Ok(reminder) = serde_json::from_str::<Reminder>(&data) {
-            if active.contains(&reminder.source) {
+        if let Ok(reminder) = serde_json::from_str::<Reminder>(&data)
+            && active.contains(&reminder.source) {
                 let current = [Kind::Calendar, Kind::TaskList]
                     .into_iter()
                     .find(|kind| registry.source(&reminder.source, *kind).is_some())
@@ -146,7 +146,6 @@ fn collect(registry: &Registry, now: i64) -> Vec<Reminder> {
                     emit(registry, reminder, now, &mut due);
                 }
             }
-        }
     }
     due
 }

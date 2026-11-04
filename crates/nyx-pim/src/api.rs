@@ -26,22 +26,19 @@ pub(crate) fn time(v: &Value) -> Option<String> {
         return Some(format!(";VALUE=DATE:{}", date.replace('-', "")));
     }
     let value = v.get("dateTime").and_then(Value::as_str)?;
-    if let Some(zone) = v.get("timeZone").and_then(Value::as_str) {
-        if zone.contains('/') && zone.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c)) {
-            if let Ok(value) = chrono::DateTime::parse_from_rfc3339(value) {
+    if let Some(zone) = v.get("timeZone").and_then(Value::as_str)
+        && zone.contains('/') && zone.chars().all(|c| c.is_ascii_alphanumeric() || "/_+-".contains(c))
+            && let Ok(value) = chrono::DateTime::parse_from_rfc3339(value) {
                 return Some(format!(";TZID={zone}:{}", value.naive_local().format("%Y%m%dT%H%M%S")));
             }
-        }
-    }
     if let Ok(value) = chrono::DateTime::parse_from_rfc3339(value) {
         return Some(format!(":{}", value.with_timezone(&chrono::Utc).format("%Y%m%dT%H%M%SZ")));
     }
     // Graph UTC responses can omit the trailing Z.
-    if v.get("timeZone").and_then(Value::as_str) == Some("UTC") {
-        if let Ok(value) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f") {
+    if v.get("timeZone").and_then(Value::as_str) == Some("UTC")
+        && let Ok(value) = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S%.f") {
             return Some(format!(":{}Z", value.format("%Y%m%dT%H%M%S")));
         }
-    }
     None
 }
 pub(crate) fn event(value: &Value, google: bool) -> Option<String> {
@@ -61,10 +58,9 @@ pub(crate) fn event(value: &Value, google: bool) -> Option<String> {
     } else {
         crate::zones::graph_time(&value["start"], original_zone, all_day)
     };
-    if let Some(start) = starts {
+    {
+        let start = starts?;
         lines.push(format!("DTSTART{start}"));
-    } else {
-        return None;
     }
     let ends = if google { time(&value["end"]) } else { crate::zones::graph_time(&value["end"], original_zone, all_day) };
     if let Some(end) = ends {
@@ -281,17 +277,16 @@ pub(crate) fn card(value: &Value, google: bool) -> Option<String> {
     };
     lines.push(format!("N:{}", name_fields.iter().map(|key| escape(&text(&name, key))).collect::<Vec<_>>().join(";")));
     if google {
-        if let Some(organizations) = value["organizations"].as_array() {
-            if let Some(organization) = organizations.first() {
+        if let Some(organizations) = value["organizations"].as_array()
+            && let Some(organization) = organizations.first() {
                 property(&mut lines, "ORG", &text(organization, "name"));
                 property(&mut lines, "TITLE", &text(organization, "title"));
             }
-        }
         if let Some(notes) = value["biographies"].as_array().and_then(|a| a.first()) {
             property(&mut lines, "NOTE", &text(notes, "value"));
         }
-        if let Some(birthday) = value["birthdays"].as_array().and_then(|a| a.first()).and_then(|b| b.get("date")) {
-            if let (Some(month), Some(day)) = (birthday["month"].as_u64(), birthday["day"].as_u64()) {
+        if let Some(birthday) = value["birthdays"].as_array().and_then(|a| a.first()).and_then(|b| b.get("date"))
+            && let (Some(month), Some(day)) = (birthday["month"].as_u64(), birthday["day"].as_u64()) {
                 let date = if let Some(year) = birthday["year"].as_u64().filter(|n| *n > 0) {
                     format!("{year:04}-{month:02}-{day:02}")
                 } else {
@@ -299,7 +294,6 @@ pub(crate) fn card(value: &Value, google: bool) -> Option<String> {
                 };
                 property(&mut lines, "BDAY", &date);
             }
-        }
         if let Some(urls) = value["urls"].as_array() {
             for url in urls {
                 let kind: String = text(url, "type").chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
@@ -432,11 +426,10 @@ impl Registry {
                         if let Some(start) = crate::zones::graph_time(&task["startDateTime"], None, false) {
                             lines.push(format!("DTSTART{start}"));
                         }
-                        if !task["recurrence"].is_null() {
-                            if let Some(rule) = graph_rule(&task["recurrence"], false, task["dueDateTime"]["timeZone"].as_str()) {
+                        if !task["recurrence"].is_null()
+                            && let Some(rule) = graph_rule(&task["recurrence"], false, task["dueDateTime"]["timeZone"].as_str()) {
                                 lines.push(rule);
                             }
-                        }
                         lines.push(format!(
                             "PRIORITY:{}",
                             match task["importance"].as_str() {

@@ -119,28 +119,6 @@ impl AddressBook {
         if self.name.is_empty() { &self.uid } else { &self.name }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn incoming_contact_updates_keep_unknown_fields() {
-        let registry =
-            Registry::open(std::env::temp_dir().join(format!("nyx-contact-fixture-{}/pim.db", uuid::Uuid::new_v4()))).unwrap();
-        import_vcards(&registry, "fixture", "Fixture", "BEGIN:VCARD\r\nUID:fixture\r\nFN:Before\r\nEND:VCARD\r\n").unwrap();
-        import_vcards(
-            &registry,
-            "fixture",
-            "Fixture",
-            "begin:vcard\r\nuid:fixture\r\nFN:After\r\nX-CUSTOM:preserved\r\nend:vcard\r\n",
-        )
-        .unwrap();
-        let payload: String =
-            registry.db.borrow().query_row("SELECT payload FROM contacts WHERE book='fixture'", [], |r| r.get(0)).unwrap();
-        assert!(payload.contains("FN:After"));
-        assert!(payload.contains("X-CUSTOM:preserved"));
-    }
-}
 pub(crate) fn reconcile(registry: &Registry, book: &str, seen: &std::collections::HashSet<String>) -> Result<(), Error> {
     let known: Vec<String> = {
         let db = registry.db.borrow();
@@ -171,4 +149,26 @@ pub fn delete_vcards(book: &str, expected: &[(String, String)]) -> Result<(), Er
 /// Keep raw properties the existing editor did not change.
 pub fn merge_editor_changes(raw: &str, before: &str, after: &str) -> Result<String, Error> {
     crate::contact_sync::merge_editor(raw, before, after)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn incoming_contact_updates_keep_unknown_fields() {
+        let registry =
+            Registry::open(std::env::temp_dir().join(format!("nyx-contact-fixture-{}/pim.db", uuid::Uuid::new_v4()))).unwrap();
+        import_vcards(&registry, "fixture", "Fixture", "BEGIN:VCARD\r\nUID:fixture\r\nFN:Before\r\nEND:VCARD\r\n").unwrap();
+        import_vcards(
+            &registry,
+            "fixture",
+            "Fixture",
+            "begin:vcard\r\nuid:fixture\r\nFN:After\r\nX-CUSTOM:preserved\r\nend:vcard\r\n",
+        )
+        .unwrap();
+        let payload: String =
+            registry.db.borrow().query_row("SELECT payload FROM contacts WHERE book='fixture'", [], |r| r.get(0)).unwrap();
+        assert!(payload.contains("FN:After"));
+        assert!(payload.contains("X-CUSTOM:preserved"));
+    }
 }

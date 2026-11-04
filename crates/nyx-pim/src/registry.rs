@@ -92,12 +92,11 @@ CREATE TABLE IF NOT EXISTS alarms(source TEXT,uid TEXT,rid TEXT,due INTEGER,unti
     }
     pub fn add_source(&self, source: &Source) -> Result<(), Error> {
         let mut source = source.clone();
-        if source.account.is_some() {
-            if let Some(previous) = self.source(&source.uid, source.kind) {
+        if source.account.is_some()
+            && let Some(previous) = self.source(&source.uid, source.kind) {
                 source.selected = previous.selected;
                 source.color = previous.color;
             }
-        }
         self.db
             .borrow()
             .execute(

@@ -434,6 +434,7 @@ impl Registry {
         self.db.borrow().execute("INSERT INTO contact_baselines VALUES(?1,?2,?3,?4) ON CONFLICT(book,uid) DO UPDATE SET payload=excluded.payload,raw=excluded.raw",params![book,uid,payload,raw.to_string()]).map_err(error)?;
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)]
     fn merge_contact(
         &self,
         book: &str,
@@ -470,8 +471,8 @@ impl Registry {
             baseline.as_deref().and_then(|s|serde_json::from_str::<Value>(s).ok()).map(|v|revision(&v,true))
         } else { None };
         let previous_revision = baseline_revision.as_deref().or_else(||previous.as_ref().map(|(_,e)|e.as_str()));
-        if let Some((local, true)) = &local {
-            if previous_revision != Some(etag)
+        if let Some((local, true)) = &local
+            && previous_revision != Some(etag)
                 && !(previous.is_none() && parse(local)? == parse(payload)?)
             {
                 self.record_issue(book, uid, "", if dav { "contact-dav" } else { "contact-api" }, payload, etag, id, false)?;
@@ -480,7 +481,6 @@ impl Registry {
                     "A contact changed on the provider while you edited it. Review both versions in Settings → Online Accounts.",
                 ));
             }
-        }
         contacts::import_vcards(self, book, book, payload)?;
         self.contact_revision(book, uid, id, etag, payload, raw)?;
         snapshot.commit()

@@ -93,8 +93,8 @@ fn export() -> Result<Bundle> {
                     gio::DBusCallFlags::NONE,
                     8000,
                     gio::Cancellable::NONE,
-                ) {
-                    if let Some(uri) =
+                )
+                    && let Some(uri) =
                         reply.try_child_value(0).and_then(|v| v.as_variant()).and_then(|v| v.str().map(str::to_owned))
                     {
                         let uri = uri.strip_prefix("davs:").map(|s| format!("https:{s}")).unwrap_or(uri);
@@ -106,7 +106,6 @@ fn export() -> Result<Bundle> {
                             }
                         }
                     }
-                }
             }
             bundle.accounts.push(nyx_accounts_native::Account {
                 id: String::new(),

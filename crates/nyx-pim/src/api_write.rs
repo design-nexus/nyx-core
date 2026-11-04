@@ -478,7 +478,7 @@ impl Registry {
                         body["transactionId"] = json!(stable);
                     }
                 }
-                if let Some(original_payload) = self
+                if let Ok(original_payload) = self
                     .db
                     .borrow()
                     .query_row(
@@ -486,7 +486,6 @@ impl Registry {
                         rusqlite::params![source, uid, rid],
                         |r| r.get::<_, String>(0),
                     )
-                    .ok()
                 {
                     let original = calendar.component(&original_payload)?;
                     let original = calendar.read(original.ptr());
@@ -672,15 +671,14 @@ impl Registry {
                             "A previous task creation has an uncertain outcome. Check the provider before retrying; your local task is retained.",
                         ));
                     }
-                    if google {
-                        if let Some(parent) = &item.parent {
+                    if google
+                        && let Some(parent) = &item.parent {
                             let parent = self
                                 .api_resource(source, parent, "")
                                 .map(|(id, _)| id)
                                 .ok_or_else(|| error("Sync the parent task first"))?;
                             target.query_pairs_mut().append_pair("parent", &parent);
                         }
-                    }
                     self.db
                         .borrow()
                         .execute("INSERT INTO uncertain_creates VALUES(?1,?2)", rusqlite::params![source, uid])

@@ -550,8 +550,7 @@ impl Calendar {
         while let Some(zone) = unsafe { Owned::new(timezone) } {
             if let Some(property) =
                 unsafe { Owned::new(sys::i_cal_component_get_first_property(zone.ptr(), sys::I_CAL_TZID_PROPERTY)) }
-            {
-                if let (Some(tzid), Some(payload)) = unsafe {
+                && let (Some(tzid), Some(payload)) = unsafe {
                     (
                         borrowed(sys::i_cal_property_get_tzid(property.ptr())),
                         owned(sys::i_cal_component_as_ical_string(zone.ptr())),
@@ -559,7 +558,6 @@ impl Calendar {
                 } {
                     self.registry.db.borrow().execute("INSERT INTO timezones VALUES(?1,?2,?3) ON CONFLICT(source,tzid) DO UPDATE SET payload=excluded.payload",rusqlite::params![self.uid,tzid,payload]).map_err(error)?;
                 }
-            }
             timezone = unsafe { sys::i_cal_component_get_next_component(root.ptr(), sys::I_CAL_VTIMEZONE_COMPONENT) };
         }
         let mut ids = Vec::new();
@@ -584,15 +582,11 @@ impl Calendar {
         while let Some(alarm) = unsafe { Owned::new(next) } {
             if let Some(property) =
                 unsafe { Owned::new(sys::i_cal_component_get_first_property(alarm.ptr(), sys::I_CAL_TRIGGER_PROPERTY)) }
-            {
-                if let Some(trigger) = unsafe { Owned::new(sys::i_cal_property_get_trigger(property.ptr())) } {
-                    if let Some(time) = unsafe { Owned::new(sys::i_cal_trigger_get_time(trigger.ptr())) } {
-                        if unsafe { sys::i_cal_time_is_null_time(time.ptr()) } == 0 {
+                && let Some(trigger) = unsafe { Owned::new(sys::i_cal_property_get_trigger(property.ptr())) }
+                    && let Some(time) = unsafe { Owned::new(sys::i_cal_trigger_get_time(trigger.ptr())) }
+                        && unsafe { sys::i_cal_time_is_null_time(time.ptr()) } == 0 {
                             result.push(unsafe { sys::i_cal_time_as_timet_with_zone(time.ptr(), ical::zone("UTC")) });
                         }
-                    }
-                }
-            }
             next = unsafe { sys::i_cal_component_get_next_component(component.ptr(), sys::I_CAL_VALARM_COMPONENT) };
         }
         result
