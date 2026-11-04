@@ -1,0 +1,19 @@
+[package]
+name = "nyx-plugin"
+version = "0.1.0"
+description = "Nyx plugins: manifests, discovery, enabled parts and grants, installing, the index"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+toml = "1"
+toml_edit = "0.25"
+
+[dev-dependencies]
+tempfile = "3"

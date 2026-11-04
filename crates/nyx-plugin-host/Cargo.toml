@@ -1,0 +1,19 @@
+[package]
+name = "nyx-plugin-host"
+version = "0.1.0"
+description = "Running Nyx plugins: supervision, systemd scopes with cgroup limits, the bubblewrap sandbox, D-Bus proxies, message limits, frames"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-channel = "2"
+libc = "0.2"
+nyx-plugin = { path = "../nyx-plugin" }
+nyx-plugin-protocol = { path = "../nyx-plugin-protocol" }
+serde_json = "1"
+toml = "1"
+
+[dev-dependencies]
+tempfile = "3"

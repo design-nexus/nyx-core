@@ -16,6 +16,10 @@ members = [
   "crates/nyx-pim-migrate",
   "crates/nyx-when",
   "crates/nyx-peer",
+  "crates/nyx-plugin-protocol",
+  "crates/nyx-plugin",
+  "crates/nyx-plugin-host",
+  "crates/nyx-plugin-sdk",
 ]
 
 [workspace.package]
