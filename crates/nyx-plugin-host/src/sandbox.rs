@@ -51,6 +51,23 @@ pub fn available() -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// The root's program and library folders as the host has them: links (`/lib64` is
+/// `usr/lib` on Arch, `usr/lib64` on Ubuntu) made again, real folders bound read-only.
+/// Programs need their loader where the host keeps it.
+fn root_links(root: &Path) -> Vec<OsString> {
+    let mut out = vec![];
+    for name in ["bin", "sbin", "lib", "lib64", "lib32", "libx32"] {
+        let host = root.join(name);
+        let inside = OsString::from(format!("/{name}"));
+        match std::fs::read_link(&host) {
+            Ok(target) => out.extend(["--symlink".into(), target.into_os_string(), inside]),
+            Err(_) if host.is_dir() => out.extend(["--ro-bind".into(), host.into_os_string(), inside]),
+            Err(_) => {}
+        }
+    }
+    out
+}
+
 /// The bwrap arguments, ending in `--`; the program goes after them. The sandbox's
 /// environment is `env` alone (`--clearenv`), while `systemd-run` outside it keeps the
 /// host's (it needs the user bus).
@@ -65,10 +82,8 @@ pub fn args(plugin_dir: &Path, storage: &Path, perms: &Permissions, sockets: &So
     if nix {
         push(&mut a, &["--ro-bind", "/nix", "/nix", "--ro-bind-try", "/usr", "/usr", "--ro-bind-try", "/bin", "/bin"]);
     } else {
-        push(&mut a, &[
-            "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/bin", "/sbin", "--symlink",
-            "usr/lib", "/lib", "--symlink", "usr/lib", "/lib64",
-        ]);
+        push(&mut a, &["--ro-bind", "/usr", "/usr"]);
+        a.extend(root_links(Path::new("/")));
     }
     push(&mut a, &["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]);
     if nix {
@@ -193,6 +208,22 @@ fn push(a: &mut Vec<OsString>, items: &[&str]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_links_follow_the_host() {
+        let t = tempfile::tempdir().unwrap();
+        let r = t.path();
+        std::fs::create_dir_all(r.join("usr/lib64")).unwrap();
+        std::os::unix::fs::symlink("usr/bin", r.join("bin")).unwrap();
+        std::os::unix::fs::symlink("usr/lib64", r.join("lib64")).unwrap();
+        std::fs::create_dir(r.join("lib")).unwrap();
+        let a: Vec<String> = root_links(r).into_iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let has = |w: &[&str]| a.windows(3).any(|x| x == w);
+        assert!(has(&["--symlink", "usr/bin", "/bin"]), "{a:?}");
+        assert!(has(&["--symlink", "usr/lib64", "/lib64"]), "{a:?}");
+        assert!(has(&["--ro-bind", &r.join("lib").to_string_lossy(), "/lib"]), "{a:?}");
+        assert!(!a.iter().any(|x| x == "/sbin"), "missing folders are left out");
+    }
 
     #[test]
     fn only_what_was_granted() {
