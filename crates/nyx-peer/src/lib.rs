@@ -90,7 +90,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("trusted-bin");
         std::fs::write(&file, "/nix/store/abc-nyx-glimpse/bin\nrelative/bin\n").unwrap();
-        // The test runs as an ordinary user, so its file is never trusted.
+        // A file root doesn't own is never trusted; as root (a CI container), hand it to
+        // nobody so it still isn't root's.
+        use std::os::unix::fs::MetadataExt;
+        if std::fs::metadata(&file).unwrap().uid() == 0 {
+            std::os::unix::fs::chown(&file, Some(65534), Some(65534)).unwrap();
+        }
         assert!(trusted_dirs(&file).is_empty());
         assert!(trusted_dirs(&dir.path().join("missing")).is_empty());
     }
