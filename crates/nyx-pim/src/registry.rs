@@ -97,11 +97,14 @@ CREATE TABLE IF NOT EXISTS alarms(source TEXT,uid TEXT,rid TEXT,due INTEGER,unti
                 source.selected = previous.selected;
                 source.color = previous.color;
             }
+        self.write_source(&source)
+    }
+    fn write_source(&self, source: &Source) -> Result<(), Error> {
         self.db
             .borrow()
             .execute(
                 "INSERT INTO sources(uid,data) VALUES(?1,?2) ON CONFLICT(uid) DO UPDATE SET data=excluded.data",
-                rusqlite::params![source.uid, serde_json::to_string(&source).map_err(error)?],
+                rusqlite::params![source.uid, serde_json::to_string(source).map_err(error)?],
             )
             .map_err(error)?;
         Ok(())
@@ -146,12 +149,12 @@ CREATE TABLE IF NOT EXISTS alarms(source TEXT,uid TEXT,rid TEXT,due INTEGER,unti
     pub fn set_selected(&self, uid: &str, kind: Kind, selected: bool) -> Result<(), Error> {
         let mut s = self.source(uid, kind).ok_or_else(|| error("Source not found"))?;
         s.selected = selected;
-        self.add_source(&s)
+        self.write_source(&s)
     }
     pub fn set_color(&self, uid: &str, kind: Kind, color: &str) -> Result<(), Error> {
         let mut s = self.source(uid, kind).ok_or_else(|| error("Source not found"))?;
         s.color = Some(color.into());
-        self.add_source(&s)
+        self.write_source(&s)
     }
     pub fn watch(&self, on_change: impl Fn() + 'static) -> Watch {
         let db = self.db.clone();
@@ -236,5 +239,30 @@ mod merge_tests {
         let next = second.write_snapshot().unwrap();
         next.commit().unwrap();
         assert!(second.db.borrow().is_autocommit());
+    }
+
+    #[test]
+    fn account_calendar_keeps_the_users_shown_and_colour_through_a_sync() {
+        let path = std::env::temp_dir().join(format!("nyx-select-{}", uuid::Uuid::new_v4())).join("pim.sqlite3");
+        let registry = Registry::open(path).unwrap();
+        let synced = Source {
+            uid: "account-calendar".into(),
+            name: "Work".into(),
+            kind: Kind::Calendar,
+            color: Some("#3e63dd".into()),
+            selected: true,
+            backend: "google".into(),
+            account: Some("account".into()),
+            group: Some("someone@example.test".into()),
+            local: false,
+            writable: true,
+        };
+        registry.add_source(&synced).unwrap();
+        registry.set_selected("account-calendar", Kind::Calendar, false).unwrap();
+        registry.set_color("account-calendar", Kind::Calendar, "#e5484d").unwrap();
+        registry.add_source(&synced).unwrap();
+        let source = registry.source("account-calendar", Kind::Calendar).unwrap();
+        assert!(!source.selected);
+        assert_eq!(source.color.as_deref(), Some("#e5484d"));
     }
 }
