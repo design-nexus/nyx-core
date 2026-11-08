@@ -2162,6 +2162,7 @@ name = "nyx-plugin"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "nyx-core",
  "serde",
  "serde_json",
  "sha2 0.10.9",

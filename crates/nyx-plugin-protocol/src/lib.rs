@@ -117,6 +117,13 @@ pub struct ThemeInfo {
     pub light: bool,
     #[serde(default)]
     pub name: String,
+    /// The theme engine's generation the host applied; 0 from older hosts.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub generation: u64,
+}
+
+fn is_zero(v: &u64) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -416,7 +423,7 @@ mod tests {
             items: vec!["time".into()],
             settings: json!({"format": "%H:%M"}),
             monitors: vec![MonitorInfo { name: "DP-1".into(), scale: 1.5, ..Default::default() }],
-            theme: ThemeInfo { light: false, name: "nyx-dark".into() },
+            theme: ThemeInfo { light: false, name: "nyx-dark".into(), generation: 3 },
             permissions: vec!["network".into()],
             frame_socket: None,
             bar_height: Some(32),

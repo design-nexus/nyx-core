@@ -17,56 +17,14 @@ use std::process::Command;
 /// Refuse anything but plain remote git URLs, before git sees them: options
 /// (`-oProxyCommand=…`), transport helpers (`ext::sh -c …`) and local paths.
 pub fn check_url(url: &str) -> Result<()> {
-    let url = url.trim();
-    // Debug builds only, for the CLI tests: a local repo by file:// URL.
-    #[cfg(debug_assertions)]
-    if std::env::var_os("NYX_PLUGIN_TEST_ALLOW_FILE").is_some() && url.starts_with("file:///") && !url.contains("::") {
-        return Ok(());
-    }
-    if url.is_empty() {
-        bail!("no URL");
-    }
-    if url.starts_with('-') {
-        bail!("{url:?} looks like an option, not a URL");
-    }
-    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        bail!("{url:?} has spaces or control characters");
-    }
-    if url.contains("::") {
-        bail!("{url:?} uses a git transport helper; only https://, ssh:// and git@host:path are allowed");
-    }
-    if url.starts_with("file:") || url.starts_with('/') || url.starts_with('.') || url.starts_with('~') {
-        bail!("{url:?} is a local path; use `nyx plugin link PATH` for a folder on this computer");
-    }
-    let scp_like = || {
-        let Some((user_host, path)) = url.split_once(':') else { return false };
-        user_host.contains('@') && !user_host.contains('/') && !path.starts_with('/') && !path.is_empty()
-    };
-    let ok = url.strip_prefix("https://").or_else(|| url.strip_prefix("ssh://")).is_some_and(|rest| {
-        let host = rest.split('/').next().unwrap_or("");
-        !host.is_empty() && !host.starts_with('-') && rest.len() > host.len() + 1
-    }) || scp_like();
-    if !ok {
-        bail!("{url:?}: use an https://, ssh:// or git@host:path URL");
-    }
-    Ok(())
-}
-
-fn git(dir: Option<&Path>, args: &[&str]) -> Result<String> {
-    let mut cmd = Command::new("git");
-    if let Some(d) = dir {
-        cmd.arg("-C").arg(d);
-    }
-    let file = if cfg!(debug_assertions) && std::env::var_os("NYX_PLUGIN_TEST_ALLOW_FILE").is_some() { "always" } else { "never" };
-    cmd.args(["-c", &format!("protocol.file.allow={file}"), "-c", "protocol.ext.allow=never", "-c", "advice.detachedHead=false"])
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_SSH_COMMAND", std::env::var("GIT_SSH_COMMAND").unwrap_or_else(|_| "ssh -oBatchMode=yes".into()));
-    let out = cmd.output().context("running git")?;
-    if !out.status.success() {
-        bail!("git {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    nyx_core::fetch::check_url(url).map_err(|e| {
+        let url = url.trim();
+        if url.starts_with("file:") || url.starts_with('/') || url.starts_with('.') || url.starts_with('~') {
+            anyhow::anyhow!("{url:?} is a local path; use `nyx plugin link PATH` for a folder on this computer")
+        } else {
+            e
+        }
+    })
 }
 
 /// A plugin unpacked in a staging folder, checked and ready to move into place.
@@ -130,24 +88,8 @@ pub fn stage(src: &Source) -> Result<Staged> {
         missing: vec![],
     };
     let checkout = work.join("src");
-    let checkout_s = checkout.to_string_lossy().to_string();
-    git(None, &["clone", "--quiet", "--", src.url, &checkout_s])?;
-    if let Some(r) = src.git_ref {
-        if r.starts_with('-') {
-            bail!("{r:?} isn't a branch, tag or commit");
-        }
-        git(Some(&checkout), &["checkout", "--quiet", r, "--"])?;
-    }
-    if let Some(c) = src.pinned_commit {
-        git(Some(&checkout), &["checkout", "--quiet", c, "--"])
-            .with_context(|| format!("the index pins commit {c}, which the repo doesn't have"))?;
-    }
-    let commit = git(Some(&checkout), &["rev-parse", "HEAD"])?;
-    if let Some(c) = src.pinned_commit
-        && !commit.eq_ignore_ascii_case(c)
-    {
-        bail!("the repo is at {commit}, not the commit the index pins ({c})");
-    }
+    let commit = nyx_core::fetch::clone(src.url, src.git_ref, src.pinned_commit, &checkout)
+        .with_context(|| src.pinned_commit.map(|c| format!("the index pins commit {c}")).unwrap_or_default())?;
     let pkg_src = match src.subdir {
         Some(s) if s.contains("..") || s.starts_with('/') => bail!("subdir {s:?}"),
         Some(s) => checkout.join(s),
@@ -178,33 +120,7 @@ pub fn stage(src: &Source) -> Result<Staged> {
 /// copied as what they point to (`follow = true`, for cloning packaged plugins whose
 /// files may be links into the Nix store).
 pub fn copy_tree(from: &Path, to: &Path, follow: bool) -> Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from).with_context(|| format!("reading {}", from.display()))? {
-        let entry = entry?;
-        let name = entry.file_name();
-        if name == ".git" || name == ORIGIN_FILE {
-            continue;
-        }
-        let path = entry.path();
-        let meta = std::fs::symlink_metadata(&path)?;
-        let target = to.join(&name);
-        if meta.file_type().is_symlink() {
-            if !follow {
-                bail!("{} is a symbolic link; plugins can't contain links", path.display());
-            }
-            let real = std::fs::metadata(&path)?;
-            if real.is_dir() {
-                copy_tree(&path, &target, true)?;
-            } else {
-                std::fs::copy(&path, &target)?;
-            }
-        } else if meta.is_dir() {
-            copy_tree(&path, &target, follow)?;
-        } else if meta.is_file() {
-            std::fs::copy(&path, &target)?;
-        }
-    }
-    Ok(())
+    nyx_core::fetch::copy_tree(from, to, follow, &[ORIGIN_FILE])
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
