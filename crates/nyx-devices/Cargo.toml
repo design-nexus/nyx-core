@@ -1,0 +1,16 @@
+[package]
+name = "nyx-devices"
+version = "0.1.0"
+description = "Remembered devices: which monitors, audio devices, input devices, Bluetooth devices and drives have saved preferences, by an identity that follows the device"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+nyx-desktop = { path = "../nyx-desktop", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

@@ -22,6 +22,7 @@ members = [
   "crates/nyx-plugin-sdk",
   "crates/nyx-ui-link",
   "crates/nyx-capability",
+  "crates/nyx-devices",
 ]
 
 [workspace.package]

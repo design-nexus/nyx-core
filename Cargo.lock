@@ -2113,6 +2113,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nyx-devices"
+version = "0.1.0"
+dependencies = [
+ "nyx-desktop",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "nyx-ecal-sys"
 version = "0.1.0"
 dependencies = [
