@@ -33,6 +33,8 @@ pub struct Monitor {
     pub y: i32,
     pub scale: f64,
     pub transform: i32,
+    /// Hz; 0 when Hyprland didn't say.
+    pub refresh_rate: f64,
     pub focused: bool,
     pub disabled: bool,
     pub active_workspace: i64,
@@ -143,10 +145,12 @@ pub struct Changes {
     /// The focused window.
     pub focus: bool,
     pub titles: bool,
+    /// Layer surfaces opened or closed.
+    pub layers: bool,
 }
 
 impl Changes {
-    pub const ALL: Changes = Changes { monitors: true, workspaces: true, active: true, windows: true, focus: true, titles: true };
+    pub const ALL: Changes = Changes { monitors: true, workspaces: true, active: true, windows: true, focus: true, titles: true, layers: true };
 
     pub fn any(&self) -> bool {
         *self != Changes::default()
@@ -159,6 +163,7 @@ impl Changes {
         self.windows |= other.windows;
         self.focus |= other.focus;
         self.titles |= other.titles;
+        self.layers |= other.layers;
     }
 }
 
@@ -169,6 +174,8 @@ pub struct Desktop {
     pub workspaces: Vec<Workspace>,
     pub windows: Vec<Window>,
     pub active_window: Option<String>,
+    /// Mapped layer surfaces by namespace, with how many share it.
+    pub layers: std::collections::BTreeMap<String, u32>,
     /// False while Hyprland is unreachable (restarting); the rest is the last known state.
     pub connected: bool,
 }
@@ -179,7 +186,30 @@ impl Desktop {
         let mut d = Desktop { connected: true, ..Default::default() };
         d.refresh_layout(instance)?;
         d.refresh_windows(instance)?;
+        // Layers are extra: a reply that doesn't parse leaves them empty, never the rest.
+        let _ = d.refresh_layers(instance);
         Ok(d)
+    }
+
+    /// Read the mapped layer surfaces again.
+    pub fn refresh_layers(&mut self, instance: &Instance) -> Result<()> {
+        let monitors: std::collections::HashMap<String, RawLayers> = instance.json("layers")?;
+        self.set_layers(monitors);
+        Ok(())
+    }
+
+    fn set_layers(&mut self, monitors: std::collections::HashMap<String, RawLayers>) {
+        self.layers.clear();
+        for m in monitors.into_values() {
+            for l in m.levels.into_values().flatten() {
+                *self.layers.entry(l.namespace).or_default() += 1;
+            }
+        }
+    }
+
+    /// Whether a layer surface with this namespace is mapped.
+    pub fn layer_open(&self, namespace: &str) -> bool {
+        self.layers.get(namespace).is_some_and(|n| *n > 0)
     }
 
     /// Read monitors and workspaces again.
@@ -361,6 +391,20 @@ impl Desktop {
                 c.monitors = true;
             }
             Event::ConfigReloaded => c = Changes::ALL,
+            Event::OpenLayer { namespace } => {
+                *self.layers.entry(namespace.clone()).or_default() += 1;
+                c.layers = true;
+            }
+            Event::CloseLayer { namespace } => {
+                if let Some(n) = self.layers.get_mut(namespace) {
+                    *n = n.saturating_sub(1);
+                    if *n == 0 {
+                        self.layers.remove(namespace);
+                    }
+                }
+                c.layers = true;
+            }
+            Event::MonitorsChanged => c.monitors = true,
             Event::Group => c.windows = true,
             Event::Other { .. } => {}
         }
@@ -448,6 +492,7 @@ struct RawMonitor {
     y: i32,
     scale: f64,
     transform: i32,
+    refresh_rate: f64,
     focused: bool,
     disabled: bool,
     active_workspace: RawRef,
@@ -474,6 +519,7 @@ impl From<RawMonitor> for Monitor {
             y: r.y,
             scale: r.scale,
             transform: r.transform,
+            refresh_rate: r.refresh_rate,
             focused: r.focused,
             disabled: r.disabled,
             active_workspace: r.active_workspace.id,
@@ -561,6 +607,18 @@ impl From<RawClient> for Window {
 #[serde(default)]
 struct RawActive {
     address: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RawLayers {
+    levels: std::collections::HashMap<String, Vec<RawLayer>>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RawLayer {
+    namespace: String,
 }
 
 #[cfg(test)]
@@ -685,6 +743,29 @@ mod tests {
         // Window at (10, 36) size 1580×954: reaches y = 990 of a 1000-high screen.
         assert!(w.overlaps(700, 940, 200, 56));
         assert!(!w.overlaps(700, 992, 200, 8));
+    }
+
+    #[test]
+    fn layers_open_and_close() {
+        let mut d = desktop();
+        let json = r#"{"eDP-2":{"levels":{"0":[{"namespace":"wallpaper"}],"3":[{"namespace":"nyx-control-center"},{"namespace":"nyx-control-center-catcher"}]}},
+                       "HEADLESS-20":{"levels":{"0":[{"namespace":"wallpaper"}]}}}"#;
+        d.set_layers(serde_json::from_str(json).unwrap());
+        assert_eq!(d.layers["wallpaper"], 2);
+        assert!(d.layer_open("nyx-control-center"));
+        let c = d.apply(&Event::parse("closelayer>>nyx-control-center"));
+        assert!(c.layers && !c.windows);
+        assert!(!d.layer_open("nyx-control-center"));
+        assert!(!d.layers.contains_key("nyx-control-center"));
+        d.apply(&Event::parse("closelayer>>nyx-control-center"));
+        assert!(!d.layer_open("nyx-control-center"), "an extra close never goes below zero");
+        d.apply(&Event::parse("openlayer>>nyx-control-center"));
+        assert!(d.layer_open("nyx-control-center"));
+    }
+
+    #[test]
+    fn refresh_rate_is_read() {
+        assert_eq!(desktop().monitor("eDP-2").unwrap().refresh_rate, 120.0);
     }
 
     #[test]

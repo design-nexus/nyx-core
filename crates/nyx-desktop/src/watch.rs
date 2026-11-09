@@ -195,6 +195,7 @@ mod tests {
                         "j/workspaces" => include_str!("../tests/data/workspaces.json"),
                         "j/clients" => clients,
                         "j/activewindow" => r#"{"address": "0x55ef7100a730"}"#,
+                        "j/layers" => r#"{"eDP-2": {"levels": {"3": [{"namespace": "nyx-control-center"}]}}}"#,
                         _ => "unknown request",
                     };
                     let _ = s.write_all(reply.as_bytes());
@@ -251,6 +252,13 @@ mod tests {
         assert!(u.desktop.connected);
         assert_eq!(u.changes, Changes::ALL);
         assert_eq!(u.desktop.windows.len(), 3);
+        assert!(u.desktop.layer_open("nyx-control-center"));
+
+        // A panel hides: its layer closes, nothing else is read.
+        events.write_all(b"closelayer>>nyx-control-center\n").unwrap();
+        let u = next(&rx);
+        assert!(u.changes.layers && !u.changes.windows);
+        assert!(!u.desktop.layer_open("nyx-control-center"));
 
         // Two events in one write arrive as one update.
         events.write_all(b"workspace>>2\nworkspacev2>>2,2\nactivewindowv2>>55ef72c2b830\n").unwrap();

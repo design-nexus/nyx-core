@@ -47,6 +47,14 @@ pub enum Event {
     Group,
     /// `configreloaded>>`
     ConfigReloaded,
+    /// `openlayer>>NAMESPACE`: a layer surface (a panel, a bar) was mapped.
+    OpenLayer { namespace: String },
+    /// `closelayer>>NAMESPACE`: one was unmapped (a panel hid).
+    CloseLayer { namespace: String },
+    /// `custom>>nyx-monitors`: a monitor's mode, scale or position changed. Hyprland's
+    /// event socket doesn't report that itself; NyxOS's Hyprland config posts this from
+    /// the Lua event ([`MONITORS_HOOK`]).
+    MonitorsChanged,
     /// Anything else, kept for logging.
     Other { name: String, data: String },
 }
@@ -120,6 +128,9 @@ impl Event {
             "monitoraddedv2" => Event::MonitorAdded { name: f(3).get(1)?.clone() },
             "monitorremovedv2" => Event::MonitorRemoved { name: f(3).get(1)?.clone() },
             "configreloaded" => Event::ConfigReloaded,
+            "openlayer" => Event::OpenLayer { namespace: data.into() },
+            "closelayer" => Event::CloseLayer { namespace: data.into() },
+            "custom" if data == MONITORS_EVENT => Event::MonitorsChanged,
             "togglegroup" | "moveintogroup" | "moveoutofgroup" => Event::Group,
             _ => return None,
         })
@@ -152,10 +163,17 @@ impl Event {
                 | Event::ActiveSpecial { .. }
                 | Event::MonitorAdded { .. }
                 | Event::MonitorRemoved { .. }
+                | Event::MonitorsChanged
                 | Event::ConfigReloaded
         )
     }
 }
+
+/// The data of the custom event for monitor changes.
+pub const MONITORS_EVENT: &str = "nyx-monitors";
+
+/// The Hyprland Lua that posts it, for configurations that want it.
+pub const MONITORS_HOOK: &str = r#"hl.on("monitor.layout_changed", function() hl.dispatch(hl.dsp.event("nyx-monitors")) end)"#;
 
 /// A window address without its `0x` prefix, lower case.
 pub fn address(raw: &str) -> String {
@@ -181,6 +199,16 @@ mod tests {
         );
         assert_eq!(Event::parse("activespecialv2>>,,eDP-2"), Event::ActiveSpecial { id: None, monitor: "eDP-2".into() });
         assert_eq!(Event::parse("monitorremovedv2>>1,HDMI-A-1,LG"), Event::MonitorRemoved { name: "HDMI-A-1".into() });
+    }
+
+    #[test]
+    fn layers_and_the_monitors_hook() {
+        assert_eq!(Event::parse("openlayer>>nyx-control-center"), Event::OpenLayer { namespace: "nyx-control-center".into() });
+        assert_eq!(Event::parse("closelayer>>nyx-control-center"), Event::CloseLayer { namespace: "nyx-control-center".into() });
+        assert_eq!(Event::parse("custom>>nyx-monitors"), Event::MonitorsChanged);
+        assert!(Event::MonitorsChanged.needs_layout());
+        assert!(matches!(Event::parse("custom>>something-else"), Event::Other { .. }));
+        assert!(MONITORS_HOOK.contains(MONITORS_EVENT));
     }
 
     #[test]
