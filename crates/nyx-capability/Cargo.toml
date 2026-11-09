@@ -1,0 +1,22 @@
+[package]
+name = "nyx-capability"
+version = "0.1.0"
+description = "What this computer can do right now: installed programs, services, hardware and connected devices, normalized, with change events"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = { version = "8", default-features = false }
+async-channel = { version = "2", optional = true }
+glib = { version = "0.22", optional = true }
+
+[features]
+# `glib` adds `Registry::subscribe_local`, which calls back on the GTK main loop.
+glib = ["dep:glib", "dep:async-channel"]
+
+[dev-dependencies]
+tempfile = "3"
