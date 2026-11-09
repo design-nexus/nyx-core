@@ -10,7 +10,8 @@ repository.workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-nyx-desktop = { path = "../nyx-desktop", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+# Only to check that monitor ids are nyx-desktop's stable_id.
+nyx-desktop = { path = "../nyx-desktop", default-features = false }

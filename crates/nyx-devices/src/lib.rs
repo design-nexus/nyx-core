@@ -76,8 +76,15 @@ impl DeviceId {
         DeviceId(format!("{}:{key}", category.prefix()))
     }
 
-    pub fn monitor(m: &nyx_desktop::Monitor) -> Self {
-        DeviceId::new(Category::Monitor, &m.stable_id())
+    /// A monitor's id: make, model and serial, or the connector when it reports none.
+    /// The same as `nyx_desktop::Monitor::stable_id`.
+    pub fn monitor(make: &str, model: &str, serial: &str, connector: &str) -> Self {
+        let key = if make.trim().is_empty() && model.trim().is_empty() {
+            connector.to_string()
+        } else {
+            format!("{}|{}|{}", make.trim(), model.trim(), serial.trim())
+        };
+        DeviceId::new(Category::Monitor, &key)
     }
 
     /// The part after the category: what owners key their preferences by.
@@ -104,13 +111,13 @@ impl DeviceId {
 
 /// How a monitor's identity can be trusted: without a serial, two of the same model look
 /// alike.
-pub fn monitor_is_weak(m: &nyx_desktop::Monitor) -> bool {
-    m.serial.trim().is_empty() || m.serial.trim() == "0"
+pub fn monitor_is_weak(serial: &str) -> bool {
+    serial.trim().is_empty() || serial.trim() == "0"
 }
 
 /// Hyprland's `desc:` rule for a monitor: its description without the connector.
-pub fn monitor_match(m: &nyx_desktop::Monitor) -> String {
-    let d = m.description.trim();
+pub fn monitor_match(description: &str) -> String {
+    let d = description.trim();
     let d = match d.rfind(" (") {
         Some(i) if d.ends_with(')') => &d[..i],
         _ => d,
@@ -362,12 +369,15 @@ mod tests {
     fn a_monitor_keeps_its_id_on_another_port() {
         let a = monitor("Dell Inc.", "U2723QE", "ABC123", "DP-1");
         let b = monitor("Dell Inc.", "U2723QE", "ABC123", "HDMI-A-1");
-        assert_eq!(DeviceId::monitor(&a), DeviceId::monitor(&b));
-        assert_eq!(DeviceId::monitor(&a).key(), "Dell Inc.|U2723QE|ABC123");
-        assert_eq!(DeviceId::monitor(&a).category(), Some(Category::Monitor));
-        assert_eq!(monitor_match(&a), "desc:Dell Inc. U2723QE ABC123");
-        assert!(!monitor_is_weak(&a));
-        assert!(monitor_is_weak(&monitor("Samsung", "X", "", "eDP-1")));
+        let id = |m: &nyx_desktop::Monitor| DeviceId::monitor(&m.make, &m.model, &m.serial, &m.name);
+        assert_eq!(id(&a), id(&b));
+        for m in [&a, &monitor("Samsung", "X", "", "eDP-1"), &monitor("", "", "", "HEADLESS-2")] {
+            assert_eq!(id(m).key(), m.stable_id(), "the same id Shell Core and the dock use");
+        }
+        assert_eq!(id(&a).category(), Some(Category::Monitor));
+        assert_eq!(monitor_match(&a.description), "desc:Dell Inc. U2723QE ABC123");
+        assert!(!monitor_is_weak(&a.serial));
+        assert!(monitor_is_weak(""));
     }
 
     #[test]
