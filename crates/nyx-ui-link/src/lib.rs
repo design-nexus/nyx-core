@@ -24,6 +24,7 @@
 //! narrows that further.
 
 pub mod patch;
+pub mod switch;
 
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
