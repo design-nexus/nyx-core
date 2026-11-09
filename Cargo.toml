@@ -20,6 +20,7 @@ members = [
   "crates/nyx-plugin",
   "crates/nyx-plugin-host",
   "crates/nyx-plugin-sdk",
+  "crates/nyx-ui-link",
 ]
 
 [workspace.package]

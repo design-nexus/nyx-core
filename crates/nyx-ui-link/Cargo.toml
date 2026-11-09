@@ -1,0 +1,15 @@
+[package]
+name = "nyx-ui-link"
+version = "0.1.0"
+description = "The link between a Nyx shell component's Rust backend and its Quickshell interface: one Unix socket, NDJSON, topics sent as a snapshot then merge patches"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
