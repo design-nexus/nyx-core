@@ -307,6 +307,23 @@ impl Registry {
     }
 }
 
+/// Call `f` (on a background thread) after any of `sources` fires, once per burst: for a
+/// page that shows live state and should redraw when it changes rather than on a timer.
+/// The watchers run for the rest of the process.
+pub fn watch(sources: Vec<Source>, f: impl Fn() + Send + 'static) {
+    let (tx, rx) = mpsc::channel::<usize>();
+    sources::spawn(sources.into_iter().map(|s| (s, vec![0])).collect(), tx);
+    std::thread::Builder::new()
+        .name("nyx-capability-watch".into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                while rx.recv_timeout(SETTLE).is_ok() {}
+                f();
+            }
+        })
+        .ok();
+}
+
 mod unix_secs {
     use serde::{Deserialize, Deserializer, Serializer};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -385,6 +402,21 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(r.state("hw:fake"), State::Available);
+    }
+
+    #[test]
+    fn watch_calls_once_per_burst() {
+        let d = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel();
+        watch(vec![Source::Folder(d.path().to_path_buf())], move || {
+            let _ = tx.send(());
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        for i in 0..5 {
+            std::fs::write(d.path().join(i.to_string()), "").unwrap();
+        }
+        assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok());
+        assert!(rx.recv_timeout(Duration::from_millis(500)).is_err(), "one call for the burst");
     }
 
     #[test]
