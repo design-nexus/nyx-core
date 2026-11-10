@@ -113,7 +113,14 @@ pub fn resolve(catalog: &Catalog, words: &[String]) -> Result<Resolution, Error>
             Ok(Resolution::Call(call(entry, &listed.action, arguments, false)))
         }
         None => {
-            let default = entry.app.default.as_deref().and_then(|d| entry.actions.iter().find(|l| l.action.id == d));
+            // The default takes free words in its own namespace only (Settings' `settings`,
+            // not its `devices`).
+            let default = entry
+                .app
+                .default
+                .as_deref()
+                .and_then(|d| entry.actions.iter().find(|l| l.action.id == d))
+                .filter(|l| l.action.namespace() == namespace);
             match default {
                 Some(listed) if !rest[0].starts_with("--") || rest.len() > 1 => {
                     let mut arguments = Map::new();
@@ -145,7 +152,9 @@ pub fn complete(catalog: &Catalog, done: &[String], partial: &str) -> Vec<String
         }
         [app] => {
             if let Ok(e) = find_app(catalog, app) {
-                for l in &e.actions {
+                let lower = app.to_lowercase();
+                let namespace = e.app.namespaces.iter().find(|n| **n == lower || n.starts_with(&lower)).unwrap_or(&e.app.namespaces[0]).clone();
+                for l in e.actions.iter().filter(|l| l.action.namespace() == namespace) {
                     out.push(l.action.verb().split('.').next().unwrap_or_default().to_string());
                     out.extend(l.action.aliases.iter().map(|a| a.word().to_string()));
                 }
@@ -516,6 +525,29 @@ mod tests {
             ]),
         );
         Catalog::merge(vec![files], vec![], &|_| None).0
+    }
+
+    #[test]
+    fn a_second_namespace_keeps_its_own_verbs_and_no_default() {
+        let settings = crate::spec::Description::from_value(
+            &json!({"tools": [
+                {"name": "settings.pages", "description": "Pages.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}, "x-nyx": {"risk": "read_only", "positional": ["query"]}},
+                {"name": "devices.list", "description": "Devices.", "x-nyx": {"risk": "read_only"}},
+                {"name": "devices.ring", "description": "Ring.", "inputSchema": {"type": "object", "properties": {"device": {"type": "string"}}, "required": ["device"]}, "x-nyx": {"risk": "writes", "positional": ["device"]}}
+            ], "nyx": {"api": 2, "app": "io.github.design_nexus.nyx.Settings", "name": "Settings", "namespaces": ["settings", "devices"],
+                       "bus_name": "io.github.design_nexus.nyx.Settings", "activation": "dbus", "default": "settings.pages"}}),
+            None,
+        )
+        .unwrap();
+        let c = Catalog::merge(vec![settings], vec![], &|_| None).0;
+        let call = |t: &str| match resolve(&c, &words(t)) {
+            Ok(Resolution::Call(c)) => Some(c.action),
+            _ => None,
+        };
+        assert_eq!(call("settings bluetooth").as_deref(), Some("settings.pages"), "the default in its namespace");
+        assert_eq!(call("devices bluetooth"), None, "not in another");
+        assert_eq!(call("devices ring phone").as_deref(), Some("devices.ring"));
+        assert_eq!(complete(&c, &words("devices"), ""), vec!["list".to_string(), "ring".to_string()]);
     }
 
     #[test]
