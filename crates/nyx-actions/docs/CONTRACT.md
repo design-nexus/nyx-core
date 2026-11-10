@@ -217,8 +217,8 @@ Exec=/absolute/path/to/nyx-notes --gapplication-service
 D-Bus expands nothing in `Exec`, so the installer writes the absolute path
 (`~/.local/bin` on Omarchy, the store path on NyxOS).
 
-- The registry starts it with `StartServiceByName` (up to 10 s, counted in the
-  action's timeout), describes it, then calls it.
+- The registry starts it by describing it (D-Bus activation; up to 25 s, counted in
+  the action's timeout, waiting for its control interface to appear), then calls it.
 - In service mode the app shows no window. The Control interface is registered at
   startup as usual; the helper holds the application while a call runs. The app sets
   a 10 s inactivity timeout and quits after it, unless it holds itself for something
@@ -358,7 +358,7 @@ is `invalid_arguments`; `action_failed` is `failed`; `permission_denied`,
 | Manifest or `Describe` reply | 256 KiB |
 | Arguments | 256 KiB |
 | `Describe` | 2 s; answers kept 10 s |
-| Activation | 10 s, inside the call's timeout |
+| Activation | 25 s, inside the call's timeout |
 | Call | 30 s by default, 300 s at most |
 | Suggest | 300 ms |
 | `StateChanged` | 10 per second per topic |

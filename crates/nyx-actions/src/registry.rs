@@ -15,8 +15,8 @@ use std::time::{Duration, Instant, SystemTime};
 /// How long running apps' descriptions stay fresh.
 const LIVE_TTL: Duration = Duration::from_secs(10);
 const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(2);
-/// Describing an app that has to start first.
-const START_TIMEOUT: Duration = Duration::from_secs(10);
+/// Describing an app that has to start first (a large app's cold start).
+const START_TIMEOUT: Duration = Duration::from_secs(25);
 
 pub struct Options {
     /// Folders of `<app-id>.json` manifests, in precedence order.
