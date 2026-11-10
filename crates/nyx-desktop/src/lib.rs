@@ -13,6 +13,8 @@
 //! - `capture` (`capture` feature): window thumbnails over `ext-image-copy-capture`.
 //! - [`profiles`]: workspace profiles, named sets of workspaces and app placements.
 //! - [`omarchy`]: Omarchy's per-workspace mode (tiling, scrolling, floating).
+//! - [`virtual_monitors`]: one screen split into two or three monitors by Nyx's Hyprland:
+//!   the saved layouts, Hyprland's state and the typed changes.
 //! - `panel` (`glib` feature): keeps the Control Center and Notification Center
 //!   mutually exclusive over D-Bus.
 //!
@@ -30,6 +32,9 @@ pub mod omarchy;
 #[cfg(feature = "glib")]
 pub mod panel;
 pub mod profiles;
+pub mod virtual_monitors;
 pub mod watch;
 
-pub use model::{Desktop, Monitor, USER_WORKSPACES, Window, Workspace, is_user_workspace};
+pub use model::{
+    Desktop, Monitor, USER_WORKSPACES, VirtualHost, VirtualRegion, Window, Workspace, is_user_workspace, user_number,
+};

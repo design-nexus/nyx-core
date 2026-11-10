@@ -55,6 +55,10 @@ pub enum Event {
     /// event socket doesn't report that itself; NyxOS's Hyprland config posts this from
     /// the Lua event ([`MONITORS_HOOK`]).
     MonitorsChanged,
+    /// `virtualmonitorv2>>HOST,STATE,REGIONS`: Nyx's Hyprland split a physical output into
+    /// virtual monitors (`split`), merged them for the moment (`merged`) or stopped
+    /// (`disabled`).
+    VirtualMonitors { host: String, state: String },
     /// Anything else, kept for logging.
     Other { name: String, data: String },
 }
@@ -131,6 +135,10 @@ impl Event {
             "openlayer" => Event::OpenLayer { namespace: data.into() },
             "closelayer" => Event::CloseLayer { namespace: data.into() },
             "custom" if data == MONITORS_EVENT => Event::MonitorsChanged,
+            "virtualmonitorv2" => {
+                let v = f(3);
+                Event::VirtualMonitors { host: v.first()?.clone(), state: v.get(1)?.clone() }
+            }
             "togglegroup" | "moveintogroup" | "moveoutofgroup" => Event::Group,
             _ => return None,
         })
@@ -164,6 +172,7 @@ impl Event {
                 | Event::MonitorAdded { .. }
                 | Event::MonitorRemoved { .. }
                 | Event::MonitorsChanged
+                | Event::VirtualMonitors { .. }
                 | Event::ConfigReloaded
         )
     }

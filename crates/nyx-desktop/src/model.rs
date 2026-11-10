@@ -12,9 +12,23 @@ use std::ops::RangeInclusive;
 /// any future agent-only workspace. Docks, widgets and wallpapers ignore those.
 pub const USER_WORKSPACES: RangeInclusive<i64> = 1..=10;
 
-/// Whether `id` is one of the user's workspaces (1 to 10).
+/// Whether `id` is one of the user's workspaces (1 to 10). A virtual monitor's own
+/// workspaces (201 to 210 for the second region, …) are user workspaces too; they need
+/// the workspace's name to tell apart, so use [`Workspace::is_user`] or
+/// [`Desktop::is_user_workspace`] where a workspace or the desktop is at hand.
 pub fn is_user_workspace(id: i64) -> bool {
     USER_WORKSPACES.contains(&id)
+}
+
+/// The number a user sees for a workspace: 1 to 10, also for a virtual monitor's own
+/// workspaces, which Hyprland numbers from the region's base (`base + n`, base a multiple
+/// of 100 from 200) and names `n`.
+pub fn user_number(id: i64, name: &str) -> Option<u32> {
+    if is_user_workspace(id) {
+        return Some(id as u32);
+    }
+    let n = id % 100;
+    (id > 100 && USER_WORKSPACES.contains(&n) && name == n.to_string()).then_some(n as u32)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,18 +58,53 @@ pub struct Monitor {
     pub reserved: [i32; 4],
 }
 
+/// Where a virtual monitor sits on its physical output.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct VirtualRegion {
+    /// The physical output's connector name.
+    pub host: String,
+    /// The physical output's [`Monitor::stable_id`].
+    pub host_stable_id: String,
+    pub host_description: String,
+    /// 1-based, left to right.
+    pub index: u32,
+    pub count: u32,
+    /// Pixels from the physical output's left edge.
+    pub pixel_offset: i32,
+    /// Its own workspaces are `workspace_base + 1` to `workspace_base + 10`; 0 for the
+    /// first region of the first split output, which keeps the ordinary 1 to 10.
+    pub workspace_base: i64,
+}
+
+/// A physical output split into virtual monitors. It isn't a screen of its own any more
+/// (no wl_output, no workspaces), so it is kept out of [`Desktop::monitors`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct VirtualHost {
+    pub name: String,
+    pub stable_id: String,
+    pub description: String,
+    pub width: i32,
+    pub height: i32,
+    pub x: i32,
+    pub y: i32,
+    pub scale: f64,
+    /// Its regions' connector names, left to right.
+    pub regions: Vec<String>,
+}
+
 impl Monitor {
     /// An id that follows the screen rather than the port: make, model and serial, or
     /// the connector name when the screen doesn't report them (virtual outputs).
     /// Laptop panels often report no serial; make and model still pick them out.
+    ///
+    /// A virtual monitor's is its physical screen's followed by `#v<n>`: Hyprland gives it
+    /// the screen's make and model and the serial `<serial>#v<n>`.
     pub fn stable_id(&self) -> String {
-        if self.make.trim().is_empty() && self.model.trim().is_empty() {
-            return self.name.clone();
-        }
-        format!("{}|{}|{}", self.make.trim(), self.model.trim(), self.serial.trim())
+        stable_id_of(&self.make, &self.model, &self.serial, &self.name)
     }
 
-    /// Headless outputs (test windows, remote sessions) rather than a real screen.
+    /// Headless outputs (test windows, remote sessions) rather than a real screen. A
+    /// virtual monitor of a real screen isn't one: it is part of that screen.
     pub fn is_virtual(&self) -> bool {
         self.name.starts_with("HEADLESS-")
     }
@@ -82,7 +131,12 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn is_user(&self) -> bool {
-        is_user_workspace(self.id)
+        self.number().is_some()
+    }
+
+    /// The number the user sees (1 to 10), see [`user_number`].
+    pub fn number(&self) -> Option<u32> {
+        user_number(self.id, &self.name)
     }
 
     pub fn is_special(&self) -> bool {
@@ -150,7 +204,8 @@ pub struct Changes {
 }
 
 impl Changes {
-    pub const ALL: Changes = Changes { monitors: true, workspaces: true, active: true, windows: true, focus: true, titles: true, layers: true };
+    pub const ALL: Changes =
+        Changes { monitors: true, workspaces: true, active: true, windows: true, focus: true, titles: true, layers: true };
 
     pub fn any(&self) -> bool {
         *self != Changes::default()
@@ -171,6 +226,10 @@ impl Changes {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Desktop {
     pub monitors: Vec<Monitor>,
+    /// Physical outputs split into virtual monitors; their regions are in `monitors`.
+    pub hosts: Vec<VirtualHost>,
+    /// The monitors that are virtual monitors, by name, and where they sit.
+    pub regions: std::collections::BTreeMap<String, VirtualRegion>,
     pub workspaces: Vec<Workspace>,
     pub windows: Vec<Window>,
     pub active_window: Option<String>,
@@ -229,6 +288,11 @@ impl Desktop {
     }
 
     fn set_layout(&mut self, monitors: Vec<RawMonitor>, workspaces: Vec<RawWorkspace>) {
+        let (hosts, monitors): (Vec<_>, Vec<_>) =
+            monitors.into_iter().partition(|m| m.r#virtual.as_ref().is_some_and(|v| v.role == "host"));
+        self.hosts = hosts.into_iter().map(VirtualHost::from).collect();
+        self.regions =
+            monitors.iter().filter_map(|m| Some((m.name.clone(), VirtualRegion::from_raw(m.r#virtual.as_ref()?)?))).collect();
         self.monitors = monitors.into_iter().map(Monitor::from).collect();
         self.workspaces = workspaces.into_iter().map(Workspace::from).collect();
         self.workspaces.sort_by_key(|w| w.id);
@@ -404,7 +468,7 @@ impl Desktop {
                 }
                 c.layers = true;
             }
-            Event::MonitorsChanged => c.monitors = true,
+            Event::MonitorsChanged | Event::VirtualMonitors { .. } => c.monitors = true,
             Event::Group => c.windows = true,
             Event::Other { .. } => {}
         }
@@ -447,6 +511,32 @@ impl Desktop {
     /// The user's workspaces that exist, in order.
     pub fn user_workspaces(&self) -> impl Iterator<Item = &Workspace> {
         self.workspaces.iter().filter(|w| w.is_user())
+    }
+
+    /// Whether the workspace with this id is one of the user's (see [`user_number`]).
+    pub fn is_user_workspace(&self, id: i64) -> bool {
+        is_user_workspace(id) || self.workspaces.iter().any(|w| w.id == id && w.is_user())
+    }
+
+    /// The user's workspaces on one monitor, in order. Every monitor shows its own; a
+    /// virtual monitor's are its region's.
+    pub fn user_workspaces_on<'a>(&'a self, monitor: &'a str) -> impl Iterator<Item = &'a Workspace> + 'a {
+        self.workspaces.iter().filter(move |w| w.monitor == monitor && w.is_user())
+    }
+
+    /// Where a monitor sits on its physical output, when it is a virtual monitor.
+    pub fn region(&self, monitor: &str) -> Option<&VirtualRegion> {
+        self.regions.get(monitor)
+    }
+
+    /// The physical output a monitor belongs to: itself, or its host when it's a region.
+    pub fn physical_name<'a>(&'a self, monitor: &'a str) -> &'a str {
+        self.region(monitor).map_or(monitor, |r| r.host.as_str())
+    }
+
+    /// The workspace id a user's workspace `number` (1 to 10) has on a monitor.
+    pub fn workspace_id(&self, monitor: &str, number: u32) -> i64 {
+        self.region(monitor).map_or(0, |r| r.workspace_base) + number as i64
     }
 
     /// Windows of an app, most recently focused first. `class` matches either the
@@ -498,6 +588,61 @@ struct RawMonitor {
     active_workspace: RawRef,
     special_workspace: RawRef,
     reserved: Vec<i32>,
+    /// Nyx's Hyprland: `null`, or a region's or a host's virtual monitor details.
+    r#virtual: Option<RawVirtual>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct RawVirtual {
+    role: String,
+    host: String,
+    host_description: String,
+    host_make: String,
+    host_model: String,
+    host_serial: String,
+    index: u32,
+    count: u32,
+    pixel_offset: i32,
+    workspace_base: i64,
+    regions: Vec<String>,
+}
+
+fn stable_id_of(make: &str, model: &str, serial: &str, name: &str) -> String {
+    if make.trim().is_empty() && model.trim().is_empty() {
+        return name.to_string();
+    }
+    format!("{}|{}|{}", make.trim(), model.trim(), serial.trim())
+}
+
+impl VirtualRegion {
+    fn from_raw(v: &RawVirtual) -> Option<VirtualRegion> {
+        (v.role == "region").then(|| VirtualRegion {
+            host_stable_id: stable_id_of(&v.host_make, &v.host_model, &v.host_serial, &v.host),
+            host: v.host.clone(),
+            host_description: v.host_description.clone(),
+            index: v.index,
+            count: v.count,
+            pixel_offset: v.pixel_offset,
+            workspace_base: v.workspace_base,
+        })
+    }
+}
+
+impl From<RawMonitor> for VirtualHost {
+    fn from(r: RawMonitor) -> Self {
+        VirtualHost {
+            stable_id: stable_id_of(&r.make, &r.model, &r.serial, &r.name),
+            name: r.name,
+            description: r.description,
+            width: r.width,
+            height: r.height,
+            x: r.x,
+            y: r.y,
+            scale: r.scale,
+            regions: r.r#virtual.map(|v| v.regions).unwrap_or_default(),
+        }
+    }
 }
 
 impl From<RawMonitor> for Monitor {
@@ -761,6 +906,58 @@ mod tests {
         assert!(!d.layer_open("nyx-control-center"), "an extra close never goes below zero");
         d.apply(&Event::parse("openlayer>>nyx-control-center"));
         assert!(d.layer_open("nyx-control-center"));
+    }
+
+    #[test]
+    fn virtual_monitors_are_regions_of_a_hidden_host() {
+        let monitors = r#"[
+            {"id":3,"name":"DP-3.v1","make":"Samsung","model":"Odyssey G95NC","serial":"H1AK#v1","width":3840,"height":2160,
+             "x":0,"y":0,"scale":1.25,"activeWorkspace":{"id":3,"name":"3"},
+             "virtual":{"role":"region","host":"DP-3","hostId":1,"hostDescription":"Samsung Odyssey G95NC H1AK","hostMake":"Samsung",
+                        "hostModel":"Odyssey G95NC","hostSerial":"H1AK","index":1,"count":2,"pixelOffset":0,"workspaceBase":0}},
+            {"id":4,"name":"DP-3.v2","make":"Samsung","model":"Odyssey G95NC","serial":"H1AK#v2","width":3840,"height":2160,
+             "x":3072,"y":0,"scale":1.25,"activeWorkspace":{"id":204,"name":"4"},
+             "virtual":{"role":"region","host":"DP-3","hostId":1,"hostDescription":"Samsung Odyssey G95NC H1AK","hostMake":"Samsung",
+                        "hostModel":"Odyssey G95NC","hostSerial":"H1AK","index":2,"count":2,"pixelOffset":3840,"workspaceBase":200}},
+            {"id":1,"name":"DP-3","make":"Samsung","model":"Odyssey G95NC","serial":"H1AK","width":7680,"height":2160,"x":0,"y":0,
+             "scale":1.25,"activeWorkspace":{"id":0,"name":""},"virtual":{"role":"host","regions":["DP-3.v1","DP-3.v2"]}},
+            {"id":0,"name":"eDP-1","make":"BOE","model":"NE160","serial":"","width":2560,"height":1600,"x":6144,"y":0,"scale":1.6,
+             "activeWorkspace":{"id":1,"name":"1"},"virtual":null}
+        ]"#;
+        let workspaces = r#"[
+            {"id":1,"name":"1","monitor":"eDP-1"},{"id":3,"name":"3","monitor":"DP-3.v1"},
+            {"id":201,"name":"1","monitor":"DP-3.v2"},{"id":204,"name":"4","monitor":"DP-3.v2"},
+            {"id":205,"name":"205","monitor":"DP-3.v2"}
+        ]"#;
+        let mut d = Desktop::default();
+        d.set_layout(serde_json::from_str(monitors).unwrap(), serde_json::from_str(workspaces).unwrap());
+
+        assert_eq!(d.monitors.len(), 3, "the host isn't a screen of its own");
+        assert_eq!(d.hosts.len(), 1);
+        assert_eq!(d.hosts[0].regions, ["DP-3.v1", "DP-3.v2"]);
+        assert_eq!(d.hosts[0].stable_id, "Samsung|Odyssey G95NC|H1AK");
+
+        let right = d.monitor("DP-3.v2").unwrap();
+        let region = d.region("DP-3.v2").unwrap();
+        assert_eq!((region.index, region.count, region.workspace_base), (2, 2, 200));
+        assert_eq!(region.host_stable_id, "Samsung|Odyssey G95NC|H1AK");
+        assert_eq!(right.stable_id(), format!("{}#v2", region.host_stable_id), "a region's id is its screen's plus #v<n>");
+        assert!(!right.is_virtual(), "a region of a real screen is a real place to put things");
+        assert_eq!(d.workspace_id("DP-3.v2", 3), 203);
+        assert_eq!(d.workspace_id("DP-3.v1", 3), 3);
+        assert_eq!(d.workspace_id("eDP-1", 3), 3);
+        assert_eq!(d.physical_name("DP-3.v2"), "DP-3");
+        assert!(d.region("eDP-1").is_none());
+
+        let numbers: Vec<(i64, Option<u32>)> = d.workspaces.iter().map(|w| (w.id, w.number())).collect();
+        assert_eq!(numbers, vec![(1, Some(1)), (3, Some(3)), (201, Some(1)), (204, Some(4)), (205, None)]);
+        let on_right: Vec<i64> = d.user_workspaces_on("DP-3.v2").map(|w| w.id).collect();
+        assert_eq!(on_right, vec![201, 204]);
+        assert!(d.is_user_workspace(204));
+        assert!(!d.is_user_workspace(205), "a workspace that only happens to have a high id isn't a region's");
+
+        assert!(Event::parse("virtualmonitorv2>>DP-3,merged,0").needs_layout());
+        assert!(d.apply(&Event::parse("virtualmonitorv2>>DP-3,split,2")).monitors);
     }
 
     #[test]

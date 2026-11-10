@@ -93,7 +93,7 @@ fn short(text: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
 
