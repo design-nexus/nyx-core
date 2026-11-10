@@ -296,6 +296,149 @@ impl Registry {
     }
 }
 
+/// A topic's live state from [`Registry::watch`]: the state now, then each change.
+/// Dropping it stops watching (the app hears `Unwatch`).
+pub struct Watch {
+    rx: tokio::sync::mpsc::Receiver<Result<Value, Error>>,
+}
+
+impl Watch {
+    /// The next state, or why it stopped (the app went away); `None` once over.
+    pub async fn next(&mut self) -> Option<Result<Value, Error>> {
+        self.rx.recv().await
+    }
+}
+
+impl Registry {
+    /// Follow topic `topic` of app `app_id` (an API 2 app; started first when D-Bus
+    /// can start it). The app works out the state only while someone watches.
+    pub async fn watch(&self, app_id: &str, topic: &str) -> Result<Watch, Error> {
+        let catalog = self.catalog().await;
+        let entry = catalog
+            .apps
+            .iter()
+            .find(|e| e.app.app == app_id)
+            .ok_or_else(|| Error::new(ErrorKind::UnknownApp, format!("{app_id} isn't installed or running")))?;
+        if !entry.app.topics.iter().any(|t| t.name == topic) {
+            return Err(Error::new(ErrorKind::UnknownAction, format!("{} has no topic {topic}", entry.app.name)));
+        }
+        if entry.running.is_none() && entry.app.activation == crate::spec::Activation::Running {
+            return Err(Error::new(ErrorKind::NotRunning, format!("Open {} to see this", entry.app.name)));
+        }
+        let app = entry.app.clone();
+        let bus = self.bus().await.ok_or_else(|| Error::new(ErrorKind::Unavailable, "there's no session bus"))?;
+        // Subscribed before asking, so no change slips between the state and the stream.
+        let changes = zbus::MessageStream::for_match_rule(
+            format!("type='signal',interface='{INTERFACE}',member='StateChanged',path='{}'", app.path()).as_str(),
+            &bus,
+            Some(64),
+        )
+        .await
+        .map_err(|e| Error::new(ErrorKind::Internal, format!("can't follow {}: {e}", app.name)))?;
+        let owners = zbus::MessageStream::for_match_rule(
+            format!("type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='{}'", app.bus_name).as_str(),
+            &bus,
+            Some(8),
+        )
+        .await
+        .map_err(|e| Error::new(ErrorKind::Internal, format!("can't follow {}: {e}", app.name)))?;
+        let body = (topic,);
+        let timeout = || Error::new(ErrorKind::Timeout, format!("{} didn't answer", app.name));
+        tokio::time::timeout(START_TIMEOUT, call_only(&bus, &app, "Watch", &body)).await.map_err(|_| timeout())??;
+        let text = tokio::time::timeout(START_TIMEOUT, call(&bus, &app, "State", &body)).await.map_err(|_| timeout())??;
+        let first: Value =
+            serde_json::from_str(&text).map_err(|_| Error::new(ErrorKind::Failed, format!("{} answered oddly", app.name)))?;
+        let owner = zbus::fdo::DBusProxy::new(&bus).await.ok();
+        let owner = match owner {
+            Some(p) => p
+                .get_name_owner(app.bus_name.as_str().try_into().map_err(|_| Error::new(ErrorKind::Internal, "bad bus name"))?)
+                .await
+                .ok()
+                .map(|o| o.to_string()),
+            None => None,
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let topic = topic.to_string();
+        tokio::spawn(follow(bus, app, topic, owner, first, changes, owners, tx));
+        Ok(Watch { rx })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn follow(
+    bus: zbus::Connection,
+    app: App,
+    topic: String,
+    owner: Option<String>,
+    first: Value,
+    mut changes: zbus::MessageStream,
+    mut owners: zbus::MessageStream,
+    tx: tokio::sync::mpsc::Sender<Result<Value, Error>>,
+) {
+    use futures_util::StreamExt;
+    let mut rev = first.get("rev").and_then(Value::as_u64).unwrap_or(0);
+    let mut state = first.get("state").cloned().unwrap_or(Value::Null);
+    if tx.send(Ok(state.clone())).await.is_err() {
+        let _ = call_only(&bus, &app, "Unwatch", &(topic.as_str(),)).await;
+        return;
+    }
+    loop {
+        tokio::select! {
+            _ = tx.closed() => break,
+            gone = owners.next() => {
+                if gone.is_none() || gone.and_then(Result::ok).and_then(|m| m.body().deserialize::<(String, String, String)>().ok()).is_some_and(|(_, _, new)| new.is_empty()) {
+                    let _ = tx.send(Err(Error::new(ErrorKind::Unavailable, format!("{} closed", app.name)))).await;
+                    return;
+                }
+            }
+            msg = changes.next() => {
+                let Some(Ok(msg)) = msg else { break };
+                let from = msg.header().sender().map(|s| s.to_string());
+                if owner.is_some() && from != owner {
+                    continue;
+                }
+                let Ok((t, r, patch)) = msg.body().deserialize::<(String, u32, String)>() else { continue };
+                if t != topic {
+                    continue;
+                }
+                let r = u64::from(r);
+                match serde_json::from_str::<Value>(&patch) {
+                    Ok(p) if r == rev + 1 => apply_patch(&mut state, &p),
+                    // Missed one: ask for the whole state.
+                    _ => match call(&bus, &app, "State", &(topic.as_str(),)).await.ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
+                        Some(whole) => state = whole.get("state").cloned().unwrap_or(Value::Null),
+                        None => continue,
+                    },
+                }
+                rev = r;
+                if tx.send(Ok(state.clone())).await.is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = call_only(&bus, &app, "Unwatch", &(topic.as_str(),)).await;
+}
+
+/// RFC 7396: `patch` merged into `target`.
+pub fn apply_patch(target: &mut Value, patch: &Value) {
+    let Value::Object(p) = patch else {
+        *target = patch.clone();
+        return;
+    };
+    if !target.is_object() {
+        *target = Value::Object(Default::default());
+    }
+    let t = target.as_object_mut().expect("an object");
+    for (k, v) in p {
+        if v.is_null() {
+            t.remove(k);
+        } else {
+            apply_patch(t.entry(k.clone()).or_insert(Value::Null), v);
+        }
+    }
+}
+
 fn read_manifest(path: &Path) -> Result<Description, String> {
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let d = Description::parse(&text, None)?;
@@ -332,6 +475,18 @@ where
         .await
         .map_err(|e| dbus_error(&app.name, e))?;
     reply.body().deserialize::<String>().map_err(|e| Error::new(ErrorKind::Failed, format!("{} answered oddly: {e}", app.name)))
+}
+
+/// A call whose answer is only that it worked.
+async fn call_only<B>(bus: &zbus::Connection, app: &App, method: &str, body: &B) -> Result<(), Error>
+where
+    B: serde::Serialize + zbus::zvariant::DynamicType,
+{
+    let path = app.path();
+    bus.call_method(Some(app.bus_name.as_str()), path.as_str(), Some(INTERFACE), method, body)
+        .await
+        .map_err(|e| dbus_error(&app.name, e))?;
+    Ok(())
 }
 
 fn dbus_error(who: &str, e: zbus::Error) -> Error {
@@ -394,6 +549,15 @@ mod tests {
         assert_eq!((e.kind, e.message.as_str()), (ErrorKind::Failed, "no vault"));
         assert_eq!(parse_reply("Notes", "{}").unwrap(), Value::Null);
         assert!(parse_reply("Notes", "nope").is_err());
+    }
+
+    #[test]
+    fn merge_patches_apply() {
+        let mut s = json!({"title": "A", "art": "x", "volume": {"level": 0.5, "muted": false}});
+        apply_patch(&mut s, &json!({"title": "B", "art": null, "volume": {"muted": true}, "queue": [1]}));
+        assert_eq!(s, json!({"title": "B", "volume": {"level": 0.5, "muted": true}, "queue": [1]}));
+        apply_patch(&mut s, &json!([2]));
+        assert_eq!(s, json!([2]));
     }
 
     #[test]

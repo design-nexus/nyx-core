@@ -96,6 +96,28 @@ impl Notes {
     fn state(&self, topic: String) -> String {
         json!({"rev": 1, "state": {"topic": topic, "notes": ["Plans"]}}).to_string()
     }
+
+    async fn watch(&self, topic: String, #[zbus(signal_emitter)] emitter: zbus::object_server::SignalEmitter<'_>) -> u32 {
+        self.0.0.lock().unwrap().push(("watch".into(), json!(topic)));
+        let emitter = emitter.to_owned();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = Notes::state_changed(&emitter, "recent", 2, &json!({"notes": ["Plans", "Ideas"]}).to_string()).await;
+        });
+        1
+    }
+
+    fn unwatch(&self, topic: String) {
+        self.0.0.lock().unwrap().push(("unwatch".into(), json!(topic)));
+    }
+
+    #[zbus(signal)]
+    async fn state_changed(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        topic: &str,
+        rev: u32,
+        patch: &str,
+    ) -> zbus::Result<()>;
 }
 
 struct Chat;
@@ -251,6 +273,23 @@ async fn routes_checks_and_starts_apps() {
     let recent = registry.state(NOTES, "recent").await.unwrap();
     assert_eq!((recent["rev"].as_u64(), recent["state"]["notes"][0].as_str()), (Some(1), Some("Plans")));
     assert_eq!(err(registry.state(NOTES, "drafts").await), ErrorKind::UnknownAction);
+
+    // Live state: the state now, then the change; dropping the watch tells the app.
+    let mut live = registry.watch(NOTES, "recent").await.unwrap();
+    assert_eq!(live.next().await.unwrap().unwrap()["notes"], json!(["Plans"]));
+    let changed = tokio::time::timeout(Duration::from_secs(3), live.next()).await.unwrap().unwrap().unwrap();
+    assert_eq!((changed["notes"].clone(), changed["topic"].as_str()), (json!(["Plans", "Ideas"]), Some("recent")));
+    drop(live);
+    let mut unwatched = false;
+    for _ in 0..100 {
+        if seen.0.lock().unwrap().iter().any(|(a, t)| a == "unwatch" && t == "recent") {
+            unwatched = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(unwatched, "the app heard Unwatch");
+    assert_eq!(err(registry.watch(MAIL, "inbox").await.map(|_| Value::Null)), ErrorKind::UnknownAction);
 
     // A changed manifest is read again.
     let mut changed = weather_description();

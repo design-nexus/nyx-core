@@ -22,4 +22,4 @@ pub use error::{Error, ErrorKind};
 pub use spec::{Action, Activation, Alias, App, Confirmation, Description, ResultKind, Risk};
 
 #[cfg(feature = "registry")]
-pub use registry::{InvokeOptions, Options, Registry};
+pub use registry::{InvokeOptions, Options, Registry, Watch};
