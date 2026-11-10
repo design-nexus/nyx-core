@@ -278,18 +278,23 @@ impl Settings {
 
     /// The entry for a screen, made if it has none.
     pub fn display_mut(&mut self, monitor: &crate::Monitor) -> &mut Display {
-        let id = monitor.stable_id();
-        let i = match self.displays.iter().position(|d| d.matches(&id, &monitor.name)) {
+        self.entry(&monitor.stable_id(), &monitor.name, &monitor.description)
+    }
+
+    /// The entry for the screen with this identity, connector and Hyprland description,
+    /// made if it has none; the connector and description are brought up to date.
+    pub fn entry(&mut self, stable_id: &str, connector: &str, description: &str) -> &mut Display {
+        let i = match self.displays.iter().position(|d| d.matches(stable_id, connector)) {
             Some(i) => i,
             None => {
-                self.displays.push(Display { id: id.clone(), ..Display::default() });
+                self.displays.push(Display { id: stable_id.to_string(), ..Display::default() });
                 self.displays.len() - 1
             }
         };
         let d = &mut self.displays[i];
-        d.id = id;
-        d.connector = monitor.name.clone();
-        d.description = monitor.description.clone();
+        d.id = stable_id.to_string();
+        d.connector = connector.to_string();
+        d.description = description.to_string();
         d
     }
 
