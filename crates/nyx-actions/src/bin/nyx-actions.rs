@@ -119,7 +119,7 @@ async fn help(registry: &Registry, words: &[String]) -> Result<(), Error> {
     match words.get(1) {
         None => app_help(e),
         Some(_) => match resolve::resolve(&catalog, words)? {
-            Resolution::Call(c) => action_help(e, &e.actions.iter().find(|l| l.action.id == c.action).expect("resolved").action),
+            Resolution::Call(c) => action_help(&e.actions.iter().find(|l| l.action.id == c.action).expect("resolved").action),
             Resolution::App { .. } => app_help(e),
         },
     }
@@ -127,9 +127,8 @@ async fn help(registry: &Registry, words: &[String]) -> Result<(), Error> {
 }
 
 fn app_help(e: &Entry) {
-    let ns = &e.app.namespaces[0];
     println!("{} ({})\n", e.app.name, e.app.namespaces.join(", "));
-    let lines: Vec<(String, &Listed)> = e.actions.iter().map(|l| (usage(ns, &l.action), l)).collect();
+    let lines: Vec<(String, &Listed)> = e.actions.iter().map(|l| (usage(l.action.namespace(), &l.action), l)).collect();
     let width = lines.iter().map(|(u, _)| u.len()).max().unwrap_or(0).min(48);
     for (u, l) in &lines {
         let mut note = l.action.short().to_string();
@@ -146,13 +145,12 @@ fn app_help(e: &Entry) {
         }
     }
     if let Some(d) = &e.app.default {
-        println!("\nnyx {ns} WORDS… runs {d}.");
+        println!("\nnyx {} WORDS… runs {d}.", d.split('.').next().unwrap_or(d));
     }
 }
 
-fn action_help(e: &Entry, a: &Action) {
-    let ns = &e.app.namespaces[0];
-    println!("{}\n\n  {}\n\n{}", a.title, usage(ns, a), a.description);
+fn action_help(a: &Action) {
+    println!("{}\n\n  {}\n\n{}", a.title, usage(a.namespace(), a), a.description);
     let required = a.required();
     if let Some(props) = a.input_schema.get("properties").and_then(Value::as_object) {
         println!();
@@ -242,7 +240,7 @@ async fn run_words(registry: &Registry, words: &[String], flags: &Flags) -> Resu
         let names: Vec<String> = c.missing.iter().map(|m| m.to_uppercase()).collect();
         return Err(Error::new(
             ErrorKind::InvalidArguments,
-            format!("{} needs {}\n  {}", c.action, names.join(" and "), usage(&e.app.namespaces[0], &l.action)),
+            format!("{} needs {}\n  {}", c.action, names.join(" and "), usage(l.action.namespace(), &l.action)),
         ));
     }
     let arguments = Value::Object(c.arguments);
