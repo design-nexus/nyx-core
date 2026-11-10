@@ -143,6 +143,10 @@ pub struct Action {
     pub requires: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Reads private data (clipboard history, …): only trusted callers, even though
+    /// it changes nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sensitive: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggest: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -219,6 +223,7 @@ impl Action {
         put("requires", json!(self.requires), self.requires.is_empty());
         put("timeout_ms", json!(self.timeout_ms), self.timeout_ms.is_none());
         put("suggest", json!(self.suggest), self.suggest.is_empty());
+        put("sensitive", json!(true), !self.sensitive);
         put("result", json!(self.result), self.result.is_none());
         let mut tool = json!({
             "name": self.id,
@@ -529,6 +534,7 @@ fn parse_tool(tool: &Value, strict: bool) -> Result<Action, String> {
         requires: get(x, "requires", strict)?.unwrap_or_default(),
         timeout_ms: timeout_ms.map(|t| t.min(MAX_TIMEOUT_MS)),
         suggest: get(x, "suggest", strict)?.unwrap_or_default(),
+        sensitive: get(x, "sensitive", strict)?.unwrap_or(false),
         result: get(x, "result", strict)?,
     })
 }

@@ -15,6 +15,9 @@ pub fn check_call(trusted: bool, action: &Action, arguments: &Value, confirmed: 
             format!("{} {}; only Nyx programs may run it", action.id, action.risk.label()),
         ));
     }
+    if !trusted && action.sensitive {
+        return Err(Error::new(ErrorKind::PermissionDenied, format!("{} reads private data; only Nyx programs may run it", action.id)));
+    }
     if action.asks() && !confirmed {
         return Err(Error::new(
             ErrorKind::ConfirmationRequired,
@@ -63,6 +66,9 @@ mod tests {
         let asks = action(Risk::Writes, Confirmation::Ask);
         let delete = action(Risk::Destructive, Confirmation::Never);
         check_call(false, &read, &ok, false).unwrap();
+        let private = Action { sensitive: true, ..read.clone() };
+        assert_eq!(check_call(false, &private, &ok, false).unwrap_err().kind, ErrorKind::PermissionDenied, "a private read is for Nyx programs");
+        check_call(true, &private, &ok, false).unwrap();
         check_call(true, &write, &ok, false).unwrap();
         assert_eq!(check_call(false, &write, &ok, true).unwrap_err().kind, ErrorKind::PermissionDenied);
         assert_eq!(check_call(true, &asks, &ok, false).unwrap_err().kind, ErrorKind::ConfirmationRequired);

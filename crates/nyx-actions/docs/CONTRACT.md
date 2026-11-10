@@ -104,6 +104,7 @@ rest.
 | `x-nyx.permissions` | no | Permission names the app checks (its own vocabulary, such as `files.write`). Metadata for policies, such as the Assistant's; the app enforces them. |
 | `x-nyx.requires` | no | nyx-capability IDs the action depends on (`program:docker`, `service:user:nyx-homed`). While one isn't available the action is listed as unavailable, with the capability's reason. |
 | `x-nyx.timeout_ms` | no | Default 30 000, at most 300 000. |
+| `x-nyx.sensitive` | no | `true` for an action that reads private data (clipboard history): untrusted callers can't run it even though it's `read_only`. |
 | `x-nyx.suggest` | no | Argument name to the ID of a read-only action that suggests values for it (section 8). |
 | `x-nyx.result` | no | How a frontend shows the result without app-specific code: `list`, `object`, `message` or `none` (section 9). |
 
