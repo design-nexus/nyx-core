@@ -663,7 +663,7 @@ impl SessionState {
                     desktop
                         .monitor(r)
                         .and_then(|m| desktop.workspaces.iter().find(|w| w.id == m.active_workspace))
-                        .and_then(|w| w.number())
+                        .and_then(|w| desktop.workspace_number(w))
                         .unwrap_or(1)
                 })
                 .collect();

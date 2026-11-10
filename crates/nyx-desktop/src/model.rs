@@ -58,6 +58,48 @@ pub struct Monitor {
     pub reserved: [i32; 4],
 }
 
+/// How workspace ids map to the numbers (1 to 10) a user sees.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Numbering {
+    /// Omarchy gives every monitor its own block of ten (`default.hypr.monitor-workspaces`):
+    /// block `b` holds workspaces `10b + 1` to `10b + 10`. By connector, from its state
+    /// file; `None` where Omarchy doesn't number them (NyxOS, or no state file).
+    pub omarchy_blocks: Option<std::collections::BTreeMap<String, i64>>,
+}
+
+impl Numbering {
+    /// Omarchy's blocks from `$XDG_STATE_HOME/omarchy/monitor-workspaces`, if it keeps them.
+    pub fn read() -> Numbering {
+        let state = std::env::var_os("XDG_STATE_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/state")));
+        let blocks = state
+            .and_then(|d| std::fs::read_to_string(d.join("omarchy/monitor-workspaces")).ok())
+            .map(|t| Numbering::parse_omarchy(&t));
+        Numbering { omarchy_blocks: blocks }
+    }
+
+    /// Lines of `block<TAB>connector<TAB>identity`; the connector is empty for a monitor
+    /// that isn't plugged in.
+    pub fn parse_omarchy(text: &str) -> std::collections::BTreeMap<String, i64> {
+        text.lines()
+            .filter_map(|l| {
+                let mut f = l.splitn(3, '\t');
+                let block = f.next()?.trim().parse().ok()?;
+                let connector = f.next()?.trim();
+                (!connector.is_empty()).then(|| (connector.to_string(), block))
+            })
+            .collect()
+    }
+
+    /// The user's number for a numbered workspace in Omarchy's blocks.
+    fn omarchy_number(&self, id: i64) -> Option<Option<u32>> {
+        let blocks = self.omarchy_blocks.as_ref()?;
+        let last = blocks.values().copied().max().unwrap_or(0);
+        Some((id >= 1 && id <= (last + 1) * 10).then(|| ((id - 1) % 10 + 1) as u32))
+    }
+}
+
 /// Where a virtual monitor sits on its physical output.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct VirtualRegion {
@@ -228,6 +270,8 @@ pub struct Desktop {
     pub monitors: Vec<Monitor>,
     /// Physical outputs split into virtual monitors; their regions are in `monitors`.
     pub hosts: Vec<VirtualHost>,
+    /// How workspace ids map to the numbers a user sees on each monitor.
+    pub numbering: Numbering,
     /// The monitors that are virtual monitors, by name, and where they sit.
     pub regions: std::collections::BTreeMap<String, VirtualRegion>,
     pub workspaces: Vec<Workspace>,
@@ -276,6 +320,7 @@ impl Desktop {
         let monitors: Vec<RawMonitor> = instance.json("monitors all")?;
         let workspaces: Vec<RawWorkspace> = instance.json("workspaces")?;
         self.set_layout(monitors, workspaces);
+        self.numbering = Numbering::read();
         Ok(())
     }
 
@@ -510,18 +555,48 @@ impl Desktop {
 
     /// The user's workspaces that exist, in order.
     pub fn user_workspaces(&self) -> impl Iterator<Item = &Workspace> {
-        self.workspaces.iter().filter(|w| w.is_user())
+        self.workspaces.iter().filter(|w| self.workspace_number(w).is_some())
     }
 
-    /// Whether the workspace with this id is one of the user's (see [`user_number`]).
+    /// The number a user sees for a workspace (1 to 10), or `None` for an internal one.
+    /// Ordinary workspaces 1 to 10, a virtual monitor's own (see [`user_number`]), and
+    /// under Omarchy every monitor's own block of ten.
+    pub fn workspace_number(&self, w: &Workspace) -> Option<u32> {
+        if w.is_special() {
+            return None;
+        }
+        // headless outputs (test windows, remote sessions) stay internal, as before
+        if w.monitor.starts_with("HEADLESS-") {
+            return w.number();
+        }
+        self.numbering.omarchy_number(w.id).unwrap_or(None).or_else(|| w.number())
+    }
+
+    /// Whether the workspace with this id is one of the user's (see [`Desktop::workspace_number`]).
     pub fn is_user_workspace(&self, id: i64) -> bool {
-        is_user_workspace(id) || self.workspaces.iter().any(|w| w.id == id && w.is_user())
+        match self.workspaces.iter().find(|w| w.id == id) {
+            Some(w) => self.workspace_number(w).is_some(),
+            None => is_user_workspace(id) || self.numbering.omarchy_number(id).flatten().is_some(),
+        }
     }
 
-    /// The user's workspaces on one monitor, in order. Every monitor shows its own; a
-    /// virtual monitor's are its region's.
+    /// The user's workspaces on one monitor, in order.
     pub fn user_workspaces_on<'a>(&'a self, monitor: &'a str) -> impl Iterator<Item = &'a Workspace> + 'a {
-        self.workspaces.iter().filter(move |w| w.monitor == monitor && w.is_user())
+        self.workspaces.iter().filter(move |w| w.monitor == monitor && self.workspace_number(w).is_some())
+    }
+
+    /// Whether this monitor's workspace numbers are its own (a virtual monitor's, or
+    /// under Omarchy every monitor's) rather than the 1 to 10 all monitors share.
+    pub fn own_workspaces(&self, monitor: &str) -> bool {
+        self.numbering.omarchy_blocks.is_some() || self.workspace_base(monitor) != 0
+    }
+
+    /// Workspace `n` of a monitor is `workspace_base + n`.
+    pub fn workspace_base(&self, monitor: &str) -> i64 {
+        if let Some(blocks) = &self.numbering.omarchy_blocks {
+            return blocks.get(monitor).copied().unwrap_or(0) * 10;
+        }
+        self.region(monitor).map_or(0, |r| r.workspace_base)
     }
 
     /// Where a monitor sits on its physical output, when it is a virtual monitor.
@@ -536,7 +611,7 @@ impl Desktop {
 
     /// The workspace id a user's workspace `number` (1 to 10) has on a monitor.
     pub fn workspace_id(&self, monitor: &str, number: u32) -> i64 {
-        self.region(monitor).map_or(0, |r| r.workspace_base) + number as i64
+        self.workspace_base(monitor) + number as i64
     }
 
     /// Windows of an app, most recently focused first. `class` matches either the
@@ -958,6 +1033,49 @@ mod tests {
 
         assert!(Event::parse("virtualmonitorv2>>DP-3,merged,0").needs_layout());
         assert!(d.apply(&Event::parse("virtualmonitorv2>>DP-3,split,2")).monitors);
+    }
+
+    #[test]
+    fn omarchy_numbers_every_monitor_in_its_own_block() {
+        let mut d = desktop();
+        d.workspaces.push(Workspace {
+            id: 13,
+            name: "13".into(),
+            monitor: "HEADLESS-20".into(),
+            windows: 1,
+            has_fullscreen: false,
+            tiled_layout: String::new(),
+        });
+        assert!(!d.is_user_workspace(13), "without Omarchy, 13 is internal");
+        d.numbering.omarchy_blocks = Some(Numbering::parse_omarchy(
+            "0\teDP-2\tSamsung Display Corp. ATNA60DL01-0\n1\tHEADLESS-20\tHEADLESS-20\n2\t\tGone Screen\n",
+        ));
+        assert_eq!(d.numbering.omarchy_blocks.as_ref().unwrap().len(), 2, "unplugged monitors have no connector");
+        let ws13 = Workspace { monitor: "DP-1".into(), ..d.workspaces.iter().find(|w| w.id == 13).unwrap().clone() };
+        assert_eq!(d.workspace_number(&ws13), Some(3));
+        assert!(d.is_user_workspace(5));
+        assert!(!d.is_user_workspace(-1337), "named placeholders stay internal");
+        assert_eq!(d.workspace_base("HEADLESS-20"), 10);
+        assert_eq!(d.workspace_id("HEADLESS-20", 3), 13);
+        assert!(d.own_workspaces("eDP-2"));
+        d.workspaces.push(Workspace {
+            id: 61,
+            name: "61".into(),
+            monitor: "HEADLESS-6".into(),
+            windows: 1,
+            has_fullscreen: false,
+            tiled_layout: String::new(),
+        });
+        assert!(!d.is_user_workspace(61), "a headless output's workspaces stay internal under Omarchy too");
+        d.workspaces.push(Workspace {
+            id: 14,
+            name: "14".into(),
+            monitor: "DP-1".into(),
+            windows: 1,
+            has_fullscreen: false,
+            tiled_layout: String::new(),
+        });
+        assert!(d.is_user_workspace(14), "a second real screen's workspaces are the user's");
     }
 
     #[test]
