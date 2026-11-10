@@ -182,8 +182,8 @@ The registry knows an app from two sources and merges them.
    and the reason logged. Files are read when first needed and again when their
    modification time changes. Opening a frontend reads files; it starts nothing.
 2. **Running apps**: names on the session bus with the Nyx prefix answer `Describe`
-   (2 s timeout, answers kept 10 s, dropped at once when the name's owner changes).
-   An API 1 answer is a plain tool list.
+   (2 s timeout, answers kept 10 s; a call for an action not in the list asks
+   again at once). An API 1 answer is a plain tool list.
 
 Merging, per app:
 

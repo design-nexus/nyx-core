@@ -4,8 +4,9 @@ Libraries: application foundation, GOA accounts and EDS discovery (nyx-accounts)
 EDS calendars and task lists (nyx-eds over generated crates/eds/*-sys), natural-language
 dates (nyx-when), provider-independent WebDAV sync and desktop state for the Nyx desktop
 apps (nyx-desktop: Hyprland, Omarchy workspace modes, panel coordination, app matching,
-window actions, window thumbnails). No UI, helper binary, or
-application internals are extracted. Regenerate FFI with tools/gen-eds.sh only when the
+window actions, window thumbnails), app actions (nyx-actions: contract, checks, resolution,
+registry, and the `nyx-actions` command, the one binary here). No UI or application
+internals are extracted. Regenerate FFI with tools/gen-eds.sh only when the
 EDS version changes; run tools/test-eds.sh after nyx-eds changes. Tokens stay behind
 nyx-accounts' `credentials` feature (docs/online-accounts/SECURITY.md).
 

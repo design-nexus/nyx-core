@@ -9,6 +9,8 @@ repository.workspace = true
 [dependencies]
 anyhow = "1"
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"], optional = true }
+nyx-actions = { path = "../nyx-actions", default-features = false, optional = true }
+nyx-peer = { path = "../nyx-peer", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
@@ -17,4 +19,7 @@ toml = "1"
 # Everything but `app`, `paths`, `migrate` and the plain `cmd` helpers needs GTK. A
 # program without a window (a daemon) turns it off with `default-features = false`.
 default = ["gtk"]
-gtk = ["dep:gtk"]
+gtk = ["dep:gtk", "dep:nyx-actions", "dep:nyx-peer"]
+
+[dev-dependencies]
+tempfile = "3"
