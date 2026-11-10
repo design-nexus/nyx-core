@@ -95,7 +95,8 @@ fn checks_callers_and_sends_state_to_watchers() {
     };
     let own = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
     let trusted = serve_on(&server, "/t", BUS, description(), Some(own), None, handler.clone()).unwrap();
-    let _untrusted = serve_on(&server, "/u", BUS, description(), Some("/nonexistent".into()), None, handler).unwrap();
+    // Dropped at once, as serve and serve_async do: the interface still answers.
+    drop(serve_on(&server, "/u", BUS, description(), Some("/nonexistent".into()), None, handler).unwrap());
     let watching: Rc<RefCell<Vec<(String, bool)>>> = Rc::default();
     {
         let (watching, service) = (watching.clone(), trusted.clone());

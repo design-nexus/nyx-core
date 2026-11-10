@@ -324,11 +324,13 @@ pub fn serve_on(
         *inner.owners.borrow_mut() = Some(sub);
     }
     let handler = Rc::new(handler);
-    let weak = Rc::downgrade(&inner);
+    // The registration keeps the interface's state for the app's life, whether or not
+    // the caller keeps the returned Service.
+    let state = inner.clone();
     connection
         .register_object(path, &info)
         .method_call(move |_, sender, _, _, method, params, invocation| {
-            let Some(inner) = weak.upgrade() else { return };
+            let inner = &state;
             if method == "Describe" {
                 invocation.return_value(Some(&(inner.text.clone(),).to_variant()));
                 return;
@@ -336,7 +338,7 @@ pub fn serve_on(
             let handler = handler.clone();
             let method = method.to_string();
             let sender = sender.map(str::to_string);
-            identify(&inner, sender, move |inner, caller| dispatch(inner, &method, params, invocation, caller, &*handler));
+            identify(inner, sender, move |inner, caller| dispatch(inner, &method, params, invocation, caller, &*handler));
         })
         .build()
         .map_err(|e| e.to_string())?;
