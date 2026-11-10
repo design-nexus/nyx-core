@@ -23,8 +23,8 @@ mod watch;
 
 pub use client::{Client, Conn, Error, ErrorKind, Paired, socket_path};
 pub use model::{
-    Access, Battery, ClipEntry, Device, Feature, PairStep, PhoneNotification, Settings, Snapshot, Status, ThisComputer, Transfer,
-    group_key,
+    Access, Battery, ClipEntry, Conversation, Device, Feature, PairStep, PhoneNotification, Settings, Snapshot, Status,
+    ThisComputer, Transfer, group_key,
 };
 pub use watch::{Event, Watch};
 

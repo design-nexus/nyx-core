@@ -59,6 +59,7 @@ pub struct ThisComputer {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
 pub struct Battery {
     pub charge: i32,
     pub charging: bool,
@@ -91,6 +92,9 @@ pub struct Device {
     pub plugins: Vec<String>,
     #[serde(deserialize_with = "null_default")]
     pub notifications: Vec<PhoneNotification>,
+    /// The latest message of each text conversation, once fluxd has asked.
+    #[serde(deserialize_with = "null_default")]
+    pub conversations: Vec<Conversation>,
     /// `android`, `ios`, `macos`, `fluxd`; empty for an app before 0.8.
     pub app: String,
     pub app_version: String,
@@ -245,6 +249,18 @@ pub struct PhoneNotification {
     #[serde(deserialize_with = "null_default")]
     pub actions: Vec<String>,
     pub dismissable: bool,
+}
+
+/// A text conversation on the phone, by its latest message.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Conversation {
+    pub thread: i64,
+    /// The contact's name, or the address when the phone has no contact.
+    pub name: String,
+    pub address: String,
+    #[serde(deserialize_with = "null_default")]
+    pub addresses: Vec<String>,
 }
 
 /// One entry of fluxd's clipboard history.
