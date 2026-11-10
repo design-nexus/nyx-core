@@ -36,5 +36,5 @@ pub mod virtual_monitors;
 pub mod watch;
 
 pub use model::{
-    Desktop, Monitor, USER_WORKSPACES, VirtualHost, VirtualRegion, Window, Workspace, is_user_workspace, user_number,
+    Desktop, Monitor, Numbering, USER_WORKSPACES, VirtualHost, VirtualRegion, Window, Workspace, is_user_workspace, user_number,
 };
