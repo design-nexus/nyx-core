@@ -327,6 +327,10 @@ impl Registry {
         }
         let app = entry.app.clone();
         let bus = self.bus().await.ok_or_else(|| Error::new(ErrorKind::Unavailable, "there's no session bus"))?;
+        if entry.running.is_none() {
+            // Describing it starts it, and waits until it answers.
+            describe(&bus, &app.bus_name, app.path(), START_TIMEOUT, &app.name).await?;
+        }
         // Subscribed before asking, so no change slips between the state and the stream.
         let changes = zbus::MessageStream::for_match_rule(
             format!("type='signal',interface='{INTERFACE}',member='StateChanged',path='{}'", app.path()).as_str(),
@@ -449,13 +453,29 @@ fn read_manifest(path: &Path) -> Result<Description, String> {
     Ok(d)
 }
 
-/// `who`: the app's name, for errors.
+/// `who`: the app's name, for errors. An app D-Bus has just started owns its name a
+/// moment before its control interface is there: asked again until `timeout`.
 async fn describe(bus: &zbus::Connection, name: &str, path: String, timeout: Duration, who: &str) -> Result<Description, Error> {
-    let call = bus.call_method(Some(name), path.as_str(), Some(INTERFACE), "Describe", &());
-    let reply = tokio::time::timeout(timeout, call)
-        .await
-        .map_err(|_| Error::new(ErrorKind::Timeout, format!("{who} didn't start in time")))?
-        .map_err(|e| dbus_error(who, e))?;
+    let deadline = Instant::now() + timeout;
+    let reply = loop {
+        let call = bus.call_method(Some(name), path.as_str(), Some(INTERFACE), "Describe", &());
+        let left = deadline.saturating_duration_since(Instant::now());
+        match tokio::time::timeout(left, call).await {
+            Err(_) => return Err(Error::new(ErrorKind::Timeout, format!("{who} didn't start in time"))),
+            Ok(Ok(reply)) => break reply,
+            Ok(Err(zbus::Error::MethodError(e, _, _)))
+                if matches!(
+                    e.as_str(),
+                    "org.freedesktop.DBus.Error.UnknownInterface"
+                        | "org.freedesktop.DBus.Error.UnknownObject"
+                        | "org.freedesktop.DBus.Error.UnknownMethod"
+                ) && Instant::now() + Duration::from_millis(100) < deadline =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Ok(Err(e)) => return Err(dbus_error(who, e)),
+        }
+    };
     let text: String =
         reply.body().deserialize().map_err(|e| Error::new(ErrorKind::Failed, format!("{who} answered oddly: {e}")))?;
     let mut d = Description::parse(&text, Some(name)).map_err(|e| Error::new(ErrorKind::Failed, format!("{who}: {e}")))?;
