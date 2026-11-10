@@ -278,8 +278,17 @@ pub fn bind(action: &Action, words: &[String], arguments: &mut Map<String, Value
             break;
         }
         let schema = action.property(name);
-        let last_text =
-            n + 1 == open.len() && schema.and_then(|s| s.get("type")).and_then(Value::as_str).is_none_or(|t| t == "string");
+        let kind = schema.and_then(|s| s.get("type")).and_then(Value::as_str);
+        // A list takes every word but one for each positional argument after it.
+        if kind == Some("array") {
+            let take = loose.len().saturating_sub(open.len() - n - 1).max(1);
+            let item = schema.and_then(|s| s.get("items"));
+            let items: Vec<Value> =
+                loose.drain(..take.min(loose.len())).map(|w| convert(name, item, w)).collect::<Result<_, _>>()?;
+            arguments.insert((*name).clone(), Value::Array(items));
+            continue;
+        }
+        let last_text = n + 1 == open.len() && kind.is_none_or(|t| t == "string");
         let text = if last_text { std::mem::take(&mut loose).join(" ") } else { loose.remove(0).to_string() };
         arguments.insert((*name).clone(), convert(name, schema, &text)?);
     }
@@ -464,6 +473,27 @@ mod tests {
             resolve(&catalog(), &words("music")).unwrap(),
             Resolution::App { app: "io.github.design_nexus.nyx.Music".into() }
         );
+    }
+
+    #[test]
+    fn lists_take_the_words_the_rest_leave() {
+        let files = description(
+            "Files",
+            "files",
+            "dbus",
+            json!([{"name": "files.copy", "description": "Copy.", "inputSchema": {"type": "object", "properties": {"sources": {"type": "array", "items": {"type": "string"}}, "destination": {"type": "string"}}, "required": ["sources", "destination"]},
+                    "x-nyx": {"risk": "writes", "positional": ["sources", "destination"]}},
+                   {"name": "files.trash", "description": "Trash.", "inputSchema": {"type": "object", "properties": {"paths": {"type": "array", "items": {"type": "string"}}}, "required": ["paths"]},
+                    "x-nyx": {"risk": "destructive", "positional": ["paths"]}}]),
+        );
+        let c = Catalog::merge(vec![files], vec![], &|_| None).0;
+        let Resolution::Call(copy) = resolve(&c, &split_words("files copy a.txt b.txt ~/Docs")).unwrap() else { panic!() };
+        assert_eq!(
+            (copy.arguments["sources"].clone(), copy.arguments["destination"].as_str()),
+            (json!(["a.txt", "b.txt"]), Some("~/Docs"))
+        );
+        let Resolution::Call(trash) = resolve(&c, &split_words("files trash a b")).unwrap() else { panic!() };
+        assert_eq!(trash.arguments["paths"], json!(["a", "b"]));
     }
 
     #[test]
