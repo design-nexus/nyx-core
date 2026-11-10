@@ -68,6 +68,9 @@ async fn run(args: Vec<String>, flags: &Flags) -> i32 {
         Err(e) => {
             if flags.json || command == "call" {
                 println!("{}", json!({"error": e}));
+                if command == "call" {
+                    eprintln!("{e}");
+                }
             } else {
                 eprintln!("nyx: {e}");
             }
@@ -212,7 +215,13 @@ async fn run_words(registry: &Registry, words: &[String], flags: &Flags) -> Resu
         return help(registry, &words).await;
     }
     let catalog = registry.catalog().await;
-    let c = match resolve::resolve(&catalog, words)? {
+    let resolved = resolve::resolve(&catalog, words).map_err(|mut e| {
+        if e.kind == ErrorKind::UnknownApp {
+            e.message.push_str(" (nyx apps lists the apps; nyx --help, nyx's own commands)");
+        }
+        e
+    })?;
+    let c = match resolved {
         Resolution::App { app } => {
             app_help(catalog.apps.iter().find(|e| e.app.app == app).expect("resolved"));
             return Ok(());

@@ -204,7 +204,8 @@ impl Registry {
     pub async fn invoke(&self, id: &str, arguments: Value, options: &InvokeOptions) -> Result<Value, Error> {
         let started = Instant::now();
         let mut catalog = self.catalog().await;
-        if catalog.find(id).is_none() {
+        // Not listed, or listed as closed: the app may have started since the last look.
+        if catalog.find(id).is_none_or(|(_, l)| !l.available) {
             let manifests = self.manifests();
             let running = self.running(true, &manifests).await;
             catalog = self.merged(manifests, running);
