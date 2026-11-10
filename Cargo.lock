@@ -2211,6 +2211,7 @@ dependencies = [
  "futures-util",
  "jsonschema",
  "libc",
+ "nyx-peer",
  "serde",
  "serde_json",
  "tempfile",

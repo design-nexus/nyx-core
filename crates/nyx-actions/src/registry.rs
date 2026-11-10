@@ -426,21 +426,7 @@ async fn follow(
 
 /// RFC 7396: `patch` merged into `target`.
 pub fn apply_patch(target: &mut Value, patch: &Value) {
-    let Value::Object(p) = patch else {
-        *target = patch.clone();
-        return;
-    };
-    if !target.is_object() {
-        *target = Value::Object(Default::default());
-    }
-    let t = target.as_object_mut().expect("an object");
-    for (k, v) in p {
-        if v.is_null() {
-            t.remove(k);
-        } else {
-            apply_patch(t.entry(k.clone()).or_insert(Value::Null), v);
-        }
-    }
+    crate::patch::apply(target, patch)
 }
 
 fn read_manifest(path: &Path) -> Result<Description, String> {

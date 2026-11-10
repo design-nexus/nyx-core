@@ -7,15 +7,19 @@
 //!   registry and the apps' control helper (`nyx_core::control`), which has the last word.
 //! - [`catalog`] and [`resolve`]: what is on offer, and turning typed words into a call.
 //! - `registry` (feature `registry`): manifests, running apps, activation and routing.
+//! - `server` (feature `server`): the control interface for programs on zbus (daemons).
 
 pub mod catalog;
 pub mod check;
 pub mod error;
+pub mod patch;
 pub mod resolve;
 pub mod spec;
 
 #[cfg(feature = "registry")]
 pub mod registry;
+#[cfg(feature = "server")]
+pub mod server;
 
 pub use catalog::{Catalog, Entry, Listed, Source, State};
 pub use error::{Error, ErrorKind};

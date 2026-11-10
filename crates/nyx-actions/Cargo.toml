@@ -13,6 +13,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"], optional = true }
 libc = { version = "0.2", optional = true }
+nyx-peer = { path = "../nyx-peer", optional = true }
 tokio = { version = "1", features = ["rt", "time", "sync", "macros"], optional = true }
 tracing = { version = "0.1", optional = true }
 zbus = { version = "5", default-features = false, features = ["tokio"], optional = true }
@@ -24,6 +25,7 @@ zbus = { version = "5", default-features = false, features = ["tokio"], optional
 default = ["registry"]
 registry = ["dep:zbus", "dep:tokio", "dep:futures-util", "dep:tracing"]
 cli = ["registry", "dep:libc"]
+server = ["registry", "dep:nyx-peer"]
 
 [[bin]]
 name = "nyx-actions"
