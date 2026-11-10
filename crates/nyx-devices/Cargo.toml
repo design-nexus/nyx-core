@@ -1,7 +1,7 @@
 [package]
 name = "nyx-devices"
 version = "0.1.0"
-description = "Remembered devices: which monitors, audio devices, input devices, Bluetooth devices and drives have saved preferences, by an identity that follows the device"
+description = "Remembered devices: which monitors, audio devices, input devices, Bluetooth devices, drives and linked phones have saved preferences, by an identity that follows the device"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

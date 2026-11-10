@@ -2086,6 +2086,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nyx-connect"
+version = "0.1.0"
+dependencies = [
+ "nyx-devices",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "nyx-core"
 version = "0.1.0"
 dependencies = [

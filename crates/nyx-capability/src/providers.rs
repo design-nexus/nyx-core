@@ -1,11 +1,11 @@
 //! The built-in providers: programs, systemd units, D-Bus names, hardware, Shell Core,
-//! the sound server and the fingerprint reader.
+//! Flux (Nyx Connect), the sound server and the fingerprint reader.
 //!
 //! Capability ids: `program:NAME`, `service:user:UNIT` / `service:system:UNIT` (without
 //! `.service`), `bus:session:NAME` / `bus:system:NAME`, `hw:battery`, `hw:backlight`,
 //! `hw:bluetooth`, `hw:keyboard-backlight`, `hw:touchpad`, `hw:touchscreen`, `hw:mouse`,
 //! `hw:laptop-panel`, `hw:wifi`, `hw:camera`, `hw:fingerprint`, `daemon:shell-core`,
-//! `daemon:audio`.
+//! `daemon:flux`, `daemon:audio`.
 
 use crate::sources::runtime_dir;
 use crate::{Capability, Provider, Source, State};
@@ -400,6 +400,47 @@ impl Provider for ShellCore {
 
     fn sources(&self) -> Vec<Source> {
         ShellCore::socket().parent().map(|d| vec![Source::Folder(d.to_path_buf())]).unwrap_or_default()
+    }
+}
+
+/// Flux's fluxd, Nyx Connect's backend: its socket answering.
+pub struct Connect;
+
+impl Connect {
+    /// fluxd's rule: `$FLUX_SOCKET`, else the runtime folder's `flux/fluxd.sock`.
+    pub fn socket() -> PathBuf {
+        std::env::var_os("FLUX_SOCKET")
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| runtime_dir().join("flux/fluxd.sock"))
+    }
+}
+
+impl Provider for Connect {
+    fn name(&self) -> &str {
+        "connect"
+    }
+
+    fn probe(&self) -> Vec<Capability> {
+        let sock = Connect::socket();
+        let cap = |s| Capability::new("daemon:flux", "connect", s).sections(&["devices"]);
+        let c = if std::os::unix::net::UnixStream::connect(&sock).is_ok() {
+            cap(State::Available)
+        } else if Programs::find("fluxd").is_some() {
+            cap(State::Inactive).reason("Flux isn't running").operations(&["start"])
+        } else {
+            cap(State::NotInstalled).reason("Flux isn't installed")
+        };
+        vec![c]
+    }
+
+    fn sources(&self) -> Vec<Source> {
+        let mut s: Vec<Source> = program_dirs().into_iter().map(Source::Folder).collect();
+        s.push(Source::Units { system: false });
+        if let Some(dir) = Connect::socket().parent() {
+            s.push(Source::Folder(dir.to_path_buf()));
+        }
+        s
     }
 }
 

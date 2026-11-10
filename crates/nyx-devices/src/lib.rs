@@ -33,6 +33,8 @@ pub enum Category {
     Touchpad,
     Bluetooth,
     Storage,
+    /// A phone, tablet or computer paired through Flux (Nyx Connect), by Flux's device ID.
+    Linked,
 }
 
 impl Category {
@@ -46,6 +48,7 @@ impl Category {
             Category::Touchpad => "touchpad",
             Category::Bluetooth => "bluetooth",
             Category::Storage => "storage",
+            Category::Linked => "linked",
         }
     }
 
@@ -59,6 +62,7 @@ impl Category {
             Category::Touchpad => "Touchpad",
             Category::Bluetooth => "Bluetooth device",
             Category::Storage => "Drive",
+            Category::Linked => "Linked device",
         }
     }
 }
@@ -66,7 +70,7 @@ impl Category {
 /// `category:key`. The key is what follows the device rather than the port: a monitor's
 /// make, model and serial (`nyx_desktop::Monitor::stable_id`, which Shell Core and the dock
 /// key their per-screen settings by), PipeWire's `node.name`, Hyprland's input device name,
-/// a filesystem UUID, or a hash of a Bluetooth address.
+/// a filesystem UUID, a hash of a Bluetooth address, or Flux's device ID.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct DeviceId(pub String);
@@ -103,6 +107,7 @@ impl DeviceId {
             Category::Touchpad,
             Category::Bluetooth,
             Category::Storage,
+            Category::Linked,
         ]
         .into_iter()
         .find(|c| c.prefix() == prefix)

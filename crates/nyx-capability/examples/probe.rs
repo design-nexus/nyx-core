@@ -15,6 +15,7 @@ fn main() {
         ])),
         Box::new(Hardware::default()),
         Box::new(ShellCore),
+        Box::new(Connect),
         Box::new(Audio),
         Box::new(Fingerprint),
     ];
