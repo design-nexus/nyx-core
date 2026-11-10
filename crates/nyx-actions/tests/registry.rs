@@ -60,7 +60,11 @@ fn notes_description() -> Value {
             {"name": "notes.search", "description": "Search notes.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}, "x-nyx": {"risk": "read_only"}},
             {"name": "notes.create", "description": "Create a note.", "x-nyx": {"risk": "writes"}},
             {"name": "notes.delete", "description": "Delete a note.", "x-nyx": {"risk": "destructive"}},
-            {"name": "notes.slow", "description": "Takes its time.", "x-nyx": {"risk": "read_only", "timeout_ms": 300}}
+            {"name": "notes.slow", "description": "Takes its time.", "x-nyx": {"risk": "read_only", "timeout_ms": 300}},
+            {"name": "notes.open", "description": "Open a note.", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}}},
+             "x-nyx": {"risk": "writes", "positional": ["title"], "suggest": {"title": "notes.titles"}}},
+            {"name": "notes.titles", "description": "Titles starting with a prefix.", "inputSchema": {"type": "object", "properties": {"prefix": {"type": "string"}, "limit": {"type": "integer"}}},
+             "x-nyx": {"risk": "read_only"}}
         ],
         "nyx": {"api": 2, "app": NOTES, "name": "Notes", "namespaces": ["notes"], "bus_name": NOTES, "activation": "dbus", "topics": [{"name": "recent"}]}
     })
@@ -86,7 +90,16 @@ impl Notes {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 json!({"ok": null}).to_string()
             }
-            "notes.search" if args["query"] == "fail" => {
+            "notes.titles" => {
+                let prefix = args["prefix"].as_str().unwrap_or("").to_lowercase();
+                let found: Vec<Value> = ["Plans", "Planets", "Recipes"]
+                    .iter()
+                    .filter(|t| t.to_lowercase().starts_with(&prefix))
+                    .map(|t| json!({"value": t, "label": t}))
+                    .collect();
+                json!({ "ok": found }).to_string()
+            }
+                        "notes.search" if args["query"] == "fail" => {
                 json!({"error": {"kind": "permission_denied", "message": "the vault is locked"}}).to_string()
             }
             _ => json!({"ok": {"action": action, "arguments": args}}).to_string(),
@@ -269,6 +282,13 @@ async fn routes_checks_and_starts_apps() {
     assert_eq!(err(registry.invoke("mail.read", json!({}), &person).await), ErrorKind::NotRunning);
     assert_eq!(err(registry.invoke("notes.nothing", json!({}), &person).await), ErrorKind::UnknownAction);
     assert_eq!(err(registry.invoke("films.play", json!({}), &person).await), ErrorKind::UnknownApp);
+
+    // Suggestions come from the app's own read-only action, while it runs.
+    let catalog = registry.catalog().await;
+    let words = |t: &str| nyx_actions::resolve::split_words(t);
+    assert_eq!(registry.suggest(&catalog, &words("notes open"), "pla").await, vec!["Plans", "Planets"]);
+    assert!(registry.suggest(&catalog, &words("notes search"), "pla").await.is_empty(), "no suggest action");
+    assert!(registry.suggest(&catalog, &words("weather current"), "").await.is_empty());
 
     let recent = registry.state(NOTES, "recent").await.unwrap();
     assert_eq!((recent["rev"].as_u64(), recent["state"]["notes"][0].as_str()), (Some(1), Some("Plans")));

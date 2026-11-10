@@ -207,6 +207,37 @@ impl Registry {
         live.apps.clone()
     }
 
+    /// What an app's `x-nyx.suggest` action offers for the argument the next word fills
+    /// in `done` (contract section 8): only from a running app (a key press never
+    /// starts one), only a read-only action, within 300 ms; nothing otherwise.
+    pub async fn suggest(&self, catalog: &Catalog, done: &[String], partial: &str) -> Vec<String> {
+        let Some((action, argument, given)) = crate::resolve::target(catalog, done) else { return Vec::new() };
+        let Some((entry, listed)) = catalog.find(&action) else { return Vec::new() };
+        let Some(id) = listed.action.suggest.get(&argument) else { return Vec::new() };
+        let Some((_, by)) = catalog.find(id) else { return Vec::new() };
+        if entry.running.is_none() || by.action.risk != crate::spec::Risk::ReadOnly {
+            return Vec::new();
+        }
+        let mut arguments = given;
+        arguments.retain(|k, _| by.action.property(k).is_some());
+        arguments.insert("prefix".into(), json!(partial));
+        arguments.insert("limit".into(), json!(20));
+        let options = InvokeOptions { confirmed: false, trusted: true, on_behalf_of: None, frontend: "complete".into() };
+        let Ok(Ok(found)) = tokio::time::timeout(Duration::from_millis(300), self.invoke(id, Value::Object(arguments), &options)).await else {
+            return Vec::new();
+        };
+        let items = found.as_array().or_else(|| found.get("items").and_then(Value::as_array)).cloned().unwrap_or_default();
+        items
+            .iter()
+            .filter_map(|i| match i.get("value").unwrap_or(i) {
+                Value::String(s) => Some(s.clone()),
+                Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .take(20)
+            .collect()
+    }
+
     /// Check and route one call.
     pub async fn invoke(&self, id: &str, arguments: Value, options: &InvokeOptions) -> Result<Value, Error> {
         let started = Instant::now();

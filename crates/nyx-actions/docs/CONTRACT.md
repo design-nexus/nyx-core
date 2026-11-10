@@ -286,7 +286,12 @@ notes.clip?`). Frontends never guess between them.
 `read_only`, takes `{"prefix": string, "limit": integer}` plus any arguments already
 given, answers within 300 ms, and returns
 `[{"value": …, "label": "…", "detail": "…"}]`. Glimpse drops answers that arrive
-after the text changed.
+after the text changed. Frontends ask only apps that are running, so a key press never
+starts one; `format: path` (or a list of them) completes from the local file system,
+folders ending in `/`, hidden names only when the typed name starts with a dot. When
+no command matches, the CLI's error ends with how to ask Nyx Assistant instead
+(`nyx-assistant say '…'`), and Glimpse offers an "Ask Nyx Assistant" row: the words
+go there only when the person picks it.
 
 ## 9. Results
 

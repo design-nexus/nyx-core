@@ -208,6 +208,10 @@ fn usage(ns: &str, a: &Action) -> String {
     out
 }
 
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
+}
+
 async fn run_words(registry: &Registry, words: &[String], flags: &Flags) -> Result<(), Error> {
     let end = words.iter().position(|w| w == "--").unwrap_or(words.len());
     if words[..end].iter().any(|w| w == "--help" || w == "-h") {
@@ -218,6 +222,11 @@ async fn run_words(registry: &Registry, words: &[String], flags: &Flags) -> Resu
     let resolved = resolve::resolve(&catalog, words).map_err(|mut e| {
         if e.kind == ErrorKind::UnknownApp {
             e.message.push_str(" (nyx apps lists the apps; nyx --help, nyx's own commands)");
+        }
+        // Said in words no command matches: Nyx Assistant may understand, if asked.
+        if matches!(e.kind, ErrorKind::UnknownApp | ErrorKind::UnknownAction) && on_path("nyx-assistant") {
+            let said = words.join(" ").replace('\'', "'\\''");
+            e.message.push_str(&format!("\n  To ask Nyx Assistant instead: nyx-assistant say '{said}'"));
         }
         e
     })?;
@@ -374,6 +383,8 @@ async fn complete(registry: &Registry, words: &[String]) {
     };
     let catalog = registry.catalog().await;
     let mut out = resolve::complete(&catalog, &done, &partial);
+    out.extend(registry.suggest(&catalog, &done, &partial).await);
+    out.dedup();
     let extra = match done.len() {
         0 => "apps",
         1 if entry(&catalog, &done[0]).is_ok() => "--help",

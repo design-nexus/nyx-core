@@ -152,6 +152,18 @@ pub fn complete(catalog: &Catalog, done: &[String], partial: &str) -> Vec<String
             }
         }
         _ => {
+            if let Some((action, argument, _)) = target(catalog, done)
+                && let Some((_, l)) = catalog.find(&action)
+            {
+                if format(&l.action, &argument) == Some("path") {
+                    out.extend(paths(partial));
+                }
+                if done.last().is_some_and(|w| w.starts_with("--")) {
+                    out.extend(
+                        l.action.property(&argument).and_then(|s| s.get("enum")).and_then(Value::as_array).into_iter().flatten().filter_map(|v| v.as_str().map(str::to_string)),
+                    );
+                }
+            }
             if let Ok(Resolution::Call(c)) = resolve(catalog, done)
                 && let Some((_, l)) = catalog.find(&c.action)
             {
@@ -183,6 +195,72 @@ pub fn complete(catalog: &Catalog, done: &[String], partial: &str) -> Vec<String
     out.dedup();
     let partial_lower = partial.to_lowercase();
     out.retain(|c| c.to_lowercase().starts_with(&partial_lower));
+    out
+}
+
+/// The argument the next word fills in the command `done` names: the action, the
+/// argument's name, and the arguments given so far. After `--name` (not a boolean) it's
+/// that one; otherwise the first positional argument not given yet.
+pub fn target(catalog: &Catalog, done: &[String]) -> Option<(String, String, Map<String, Value>)> {
+    let previous = done.last().and_then(|w| w.strip_prefix("--")).filter(|w| !w.is_empty() && !w.contains('='));
+    // A flag waiting for its value: the words before it name the command.
+    let before = if previous.is_some() { &done[..done.len() - 1] } else { done };
+    let Ok(Resolution::Call(c)) = resolve(catalog, before) else { return None };
+    let (_, l) = catalog.find(&c.action)?;
+    let a = &l.action;
+    let flag = previous.map(|w| w.replace('-', "_"));
+    let argument = match flag {
+        Some(p) if a.property(&p).is_some_and(|s| s.get("type").and_then(Value::as_str) != Some("boolean")) => p,
+        Some(p) if a.property(&p).is_some() => return None,
+        _ => a.positional.iter().find(|p| !c.arguments.contains_key(*p) || is_list(a, p))?.clone(),
+    };
+    Some((c.action, argument, c.arguments))
+}
+
+fn is_list(action: &Action, name: &str) -> bool {
+    action.property(name).and_then(|s| s.get("type")).and_then(Value::as_str) == Some("array")
+}
+
+/// An argument's `format` (its items' for a list).
+fn format<'a>(action: &'a Action, name: &str) -> Option<&'a str> {
+    let s = action.property(name)?;
+    s.get("format").or_else(|| s.get("items")?.get("format"))?.as_str()
+}
+
+/// Local paths that complete `partial` (`~` kept as typed, folders ending in `/`,
+/// hidden ones only when the name being typed starts with a dot), at most 50.
+pub fn paths(partial: &str) -> Vec<String> {
+    if partial == "~" {
+        return vec!["~/".into()];
+    }
+    let (shown, prefix) = match partial.rfind('/') {
+        Some(i) => (&partial[..=i], &partial[i + 1..]),
+        None => ("", partial),
+    };
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let dir = match shown.strip_prefix("~/") {
+        Some(rest) => match &home {
+            Some(h) => h.join(rest),
+            None => return Vec::new(),
+        },
+        None if shown.is_empty() => std::path::PathBuf::from("."),
+        None => std::path::PathBuf::from(shown),
+    };
+    let Ok(read) = std::fs::read_dir(&dir) else { return Vec::new() };
+    let lower = prefix.to_lowercase();
+    let mut out: Vec<String> = read
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') && !prefix.starts_with('.') || !name.to_lowercase().starts_with(&lower) {
+                return None;
+            }
+            let folder = e.file_type().is_ok_and(|t| t.is_dir() || t.is_symlink() && e.path().is_dir());
+            Some(format!("{shown}{name}{}", if folder { "/" } else { "" }))
+        })
+        .collect();
+    out.sort();
+    out.truncate(50);
     out
 }
 
@@ -425,6 +503,41 @@ mod tests {
 
     fn words(text: &str) -> Vec<String> {
         split_words(text)
+    }
+
+    fn files() -> Catalog {
+        let files = description(
+            "Files",
+            "files",
+            "dbus",
+            json!([
+                {"name": "files.open", "description": "Open.", "inputSchema": {"type": "object", "properties": {"path": {"type": "string", "format": "path"}}, "required": ["path"], "additionalProperties": false}, "x-nyx": {"risk": "writes", "positional": ["path"]}},
+                {"name": "files.copy", "description": "Copy.", "inputSchema": {"type": "object", "properties": {"sources": {"type": "array", "items": {"type": "string", "format": "path"}}, "destination": {"type": "string", "format": "path"}, "name": {"type": "string"}}, "required": ["sources", "destination"], "additionalProperties": false}, "x-nyx": {"risk": "writes", "positional": ["sources", "destination"]}}
+            ]),
+        );
+        Catalog::merge(vec![files], vec![], &|_| None).0
+    }
+
+    #[test]
+    fn path_arguments_complete_from_the_folder() {
+        let dir = std::env::temp_dir().join(format!("nyx-actions-paths-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Documents")).unwrap();
+        std::fs::write(dir.join("Doc notes.txt"), "").unwrap();
+        std::fs::write(dir.join(".hidden"), "").unwrap();
+        let base = format!("{}/", dir.display());
+        assert_eq!(paths(&format!("{base}Do")), vec![format!("{base}Doc notes.txt"), format!("{base}Documents/")]);
+        assert!(paths(&base).iter().all(|p| !p.contains(".hidden")), "hidden only when asked");
+        assert_eq!(paths(&format!("{base}.h")), vec![format!("{base}.hidden")]);
+        assert_eq!(paths("~"), vec!["~/".to_string()]);
+
+        let c = files();
+        assert_eq!(target(&c, &words("files open")).map(|t| t.1), Some("path".into()));
+        assert_eq!(target(&c, &words("files copy a")).map(|t| t.1), Some("sources".into()), "a list takes more");
+        assert_eq!(target(&c, &words("files copy a --name")).map(|t| t.1), Some("name".into()));
+        let got = complete(&c, &words("files open"), &format!("{base}Docu"));
+        assert_eq!(got, vec![format!("{base}Documents/")]);
+        assert!(complete(&c, &words("files copy a --name"), &base).is_empty(), "a plain string isn't a path");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     fn resolved(text: &str) -> Call {
