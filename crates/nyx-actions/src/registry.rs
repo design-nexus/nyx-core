@@ -82,6 +82,9 @@ pub struct Registry {
     files: Mutex<HashMap<PathBuf, Cached>>,
     warned: Mutex<HashSet<String>>,
     live: tokio::sync::Mutex<Live>,
+    // The running apps as last seen, outside `live`: a refresh holds `live` while it asks
+    // every app (seconds when one is slow), and `cached` must not wait for it.
+    seen: Mutex<Vec<Description>>,
     bus: tokio::sync::OnceCell<Option<zbus::Connection>>,
 }
 
@@ -92,6 +95,7 @@ impl Registry {
             files: Mutex::default(),
             warned: Mutex::default(),
             live: tokio::sync::Mutex::default(),
+            seen: Mutex::default(),
             bus: tokio::sync::OnceCell::new(),
         }
     }
@@ -111,7 +115,7 @@ impl Registry {
     /// As [`catalog`](Self::catalog), with running apps as last seen: never waits for
     /// an app (for a search that must answer at once; `catalog` brings it up to date).
     pub async fn cached(&self) -> Catalog {
-        let running = self.live.lock().await.apps.clone();
+        let running = self.seen.lock().expect("seen").clone();
         self.merged(self.manifests(), running)
     }
 
@@ -204,6 +208,7 @@ impl Registry {
         .await;
         live.apps = answers.into_iter().filter_map(Result::ok).collect();
         live.at = Some(Instant::now());
+        *self.seen.lock().expect("seen") = live.apps.clone();
         live.apps.clone()
     }
 
@@ -294,6 +299,7 @@ impl Registry {
                 let mut live = self.live.lock().await;
                 live.apps.retain(|d| d.app.bus_name != app.bus_name);
                 live.apps.push(started);
+                *self.seen.lock().expect("seen") = live.apps.clone();
                 api
             }
         };
