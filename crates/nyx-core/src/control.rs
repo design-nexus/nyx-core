@@ -163,6 +163,8 @@ struct Inner {
     topics: RefCell<HashMap<String, Topic>>,
     on_watch: RefCell<Option<WatchFn>>,
     owners: RefCell<Option<gio::SignalSubscription>>,
+    /// Held while anything watches: a headless app stays up for a panel showing it.
+    watched: RefCell<Option<gio::ApplicationHoldGuard>>,
 }
 
 type WatchFn = Rc<dyn Fn(&str, bool)>;
@@ -298,6 +300,7 @@ pub fn serve_on(
         topics: RefCell::default(),
         on_watch: RefCell::default(),
         owners: RefCell::default(),
+        watched: RefCell::default(),
     });
     // Callers that leave stop watching.
     if connection.unique_name().is_some() {
@@ -340,6 +343,16 @@ pub fn serve_on(
     Ok(Service(inner))
 }
 
+fn hold_while_watched(inner: &Inner) {
+    let any = inner.topics.borrow().values().any(|t| !t.watchers.is_empty());
+    let mut held = inner.watched.borrow_mut();
+    match (&inner.app, any, held.is_some()) {
+        (Some(app), true, false) => *held = Some(app.hold()),
+        (_, false, true) => *held = None,
+        _ => {}
+    }
+}
+
 fn gone(inner: &Inner, name: &str) {
     inner.callers.borrow_mut().remove(name);
     let emptied: Vec<String> = {
@@ -349,6 +362,7 @@ fn gone(inner: &Inner, name: &str) {
             .filter_map(|(topic, t)| (t.watchers.remove(name).is_some() && t.watchers.is_empty()).then(|| topic.clone()))
             .collect()
     };
+    hold_while_watched(inner);
     let callback = inner.on_watch.borrow().clone();
     if let Some(f) = callback {
         for topic in emptied {
@@ -483,6 +497,7 @@ fn dispatch(
                 }
                 t.rev
             };
+            hold_while_watched(inner);
             let callback = inner.on_watch.borrow().clone();
             if let Some(f) = callback.filter(|_| first || last) {
                 f(&topic, first);
