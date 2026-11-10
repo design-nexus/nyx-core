@@ -108,6 +108,13 @@ impl Registry {
         self.merged(self.manifests(), Vec::new())
     }
 
+    /// As [`catalog`](Self::catalog), with running apps as last seen: never waits for
+    /// an app (for a search that must answer at once; `catalog` brings it up to date).
+    pub async fn cached(&self) -> Catalog {
+        let running = self.live.lock().await.apps.clone();
+        self.merged(self.manifests(), running)
+    }
+
     fn merged(&self, manifests: Vec<Description>, running: Vec<Description>) -> Catalog {
         let (catalog, warnings) = Catalog::merge(manifests, running, &missing);
         for w in warnings {

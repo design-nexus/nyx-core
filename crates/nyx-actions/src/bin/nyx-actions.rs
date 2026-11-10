@@ -373,60 +373,16 @@ async fn complete(registry: &Registry, words: &[String]) {
         None => (Vec::new(), String::new()),
     };
     let catalog = registry.catalog().await;
-    let mut out: Vec<String> = Vec::new();
-    match done.as_slice() {
-        [] => {
-            out.push("apps".into());
-            for e in &catalog.apps {
-                out.extend(e.app.namespaces.iter().cloned());
-            }
-        }
-        [app] => {
-            if let Ok(e) = entry(&catalog, app) {
-                for l in &e.actions {
-                    out.push(l.action.verb().replace('.', " ").split(' ').next().unwrap_or_default().to_string());
-                    out.extend(l.action.aliases.iter().map(|a| a.word().to_string()));
-                }
-                out.push("--help".into());
-            }
-        }
-        _ => {
-            if let Ok(Resolution::Call(c)) = resolve::resolve(&catalog, &done)
-                && let Some((_, l)) = catalog.find(&c.action)
-            {
-                let previous = done.last().and_then(|w| w.strip_prefix("--")).map(|w| w.replace('-', "_"));
-                let values = |name: &str| {
-                    l.action
-                        .property(name)
-                        .and_then(|s| s.get("enum"))
-                        .and_then(Value::as_array)
-                        .map(|c| c.iter().filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>())
-                        .unwrap_or_default()
-                };
-                match previous
-                    .filter(|p| l.action.property(p).is_some_and(|s| s.get("type").and_then(Value::as_str) != Some("boolean")))
-                {
-                    Some(p) => out.extend(values(&p)),
-                    None => {
-                        if let Some(p) = l.action.positional.iter().find(|p| !c.arguments.contains_key(*p)) {
-                            out.extend(values(p));
-                        }
-                        if let Some(props) = l.action.input_schema.get("properties").and_then(Value::as_object) {
-                            out.extend(
-                                props
-                                    .keys()
-                                    .filter(|k| !c.arguments.contains_key(*k))
-                                    .map(|k| format!("--{}", k.replace('_', "-"))),
-                            );
-                        }
-                    }
-                }
-            }
-        }
+    let mut out = resolve::complete(&catalog, &done, &partial);
+    let extra = match done.len() {
+        0 => "apps",
+        1 if entry(&catalog, &done[0]).is_ok() => "--help",
+        _ => "",
+    };
+    if !extra.is_empty() && extra.starts_with(&partial) {
+        out.push(extra.into());
     }
-    out.sort();
-    out.dedup();
-    for c in out.iter().filter(|c| c.starts_with(&partial)) {
+    for c in out {
         println!("{c}");
     }
 }

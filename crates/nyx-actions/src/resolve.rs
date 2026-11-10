@@ -132,6 +132,60 @@ pub fn resolve(catalog: &Catalog, words: &[String]) -> Result<Resolution, Error>
     }
 }
 
+/// What can follow `done` (whole words) where `partial` is being typed: namespaces,
+/// then verbs and aliases, then an argument's values (its schema's `enum`) and flags.
+/// Only candidates starting with `partial`, sorted.
+pub fn complete(catalog: &Catalog, done: &[String], partial: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    match done {
+        [] => {
+            for e in &catalog.apps {
+                out.extend(e.app.namespaces.iter().cloned());
+            }
+        }
+        [app] => {
+            if let Ok(e) = find_app(catalog, app) {
+                for l in &e.actions {
+                    out.push(l.action.verb().split('.').next().unwrap_or_default().to_string());
+                    out.extend(l.action.aliases.iter().map(|a| a.word().to_string()));
+                }
+            }
+        }
+        _ => {
+            if let Ok(Resolution::Call(c)) = resolve(catalog, done)
+                && let Some((_, l)) = catalog.find(&c.action)
+            {
+                let a = &l.action;
+                let values = |name: &str| -> Vec<String> {
+                    a.property(name)
+                        .and_then(|s| s.get("enum"))
+                        .and_then(Value::as_array)
+                        .map(|c| c.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                        .unwrap_or_default()
+                };
+                let previous = done.last().and_then(|w| w.strip_prefix("--")).map(|w| w.replace('-', "_"));
+                match previous.filter(|p| a.property(p).is_some_and(|s| s.get("type").and_then(Value::as_str) != Some("boolean")))
+                {
+                    Some(p) => out.extend(values(&p)),
+                    None => {
+                        if let Some(p) = a.positional.iter().find(|p| !c.arguments.contains_key(*p)) {
+                            out.extend(values(p));
+                        }
+                        out.extend(
+                            properties(a).filter(|k| !c.arguments.contains_key(*k)).map(|k| format!("--{}", k.replace('_', "-"))),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    let partial_lower = partial.to_lowercase();
+    out.retain(|c| c.to_lowercase().starts_with(&partial_lower));
+    out
+}
+
 fn call(entry: &Entry, action: &Action, arguments: Map<String, Value>, by_default: bool) -> Call {
     let missing = action.required().into_iter().filter(|r| !arguments.contains_key(*r)).map(str::to_string).collect();
     Call { app: entry.app.app.clone(), action: action.id.clone(), arguments, missing, by_default }
@@ -410,6 +464,18 @@ mod tests {
             resolve(&catalog(), &words("music")).unwrap(),
             Resolution::App { app: "io.github.design_nexus.nyx.Music".into() }
         );
+    }
+
+    #[test]
+    fn completions_follow_the_words() {
+        let c = catalog();
+        let w = |s: &str| words(s);
+        assert_eq!(complete(&c, &[], "no"), vec!["notes"]);
+        assert_eq!(complete(&c, &w("notes"), "c"), vec!["clear", "clip", "create"]);
+        assert_eq!(complete(&c, &w("notes"), "N"), vec!["new"]);
+        assert_eq!(complete(&c, &w("calendar list"), "w"), vec!["week"]);
+        assert_eq!(complete(&c, &w("notes create Plans"), "--"), vec!["--pinned"]);
+        assert!(complete(&c, &w("films"), "").is_empty());
     }
 
     #[test]
