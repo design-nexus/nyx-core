@@ -610,18 +610,34 @@ impl SessionState {
     }
 }
 
-/// Show each region's remembered workspace again, then give focus back.
-pub fn reapply_active(instance: &Instance, desktop: &crate::Desktop, state: &SessionState) -> Result<()> {
-    let focused = desktop.focused_monitor().map(|m| m.name.clone());
-    for host in &desktop.hosts {
-        let Some(numbers) = state.active.get(&host.stable_id) else { continue };
-        for (region, number) in host.regions.iter().zip(numbers) {
-            let Some(m) = desktop.monitor(region) else { continue };
-            let id = desktop.workspace_id(region, *number);
-            if m.active_workspace != id {
-                dispatch(instance, &format!("hl.dsp.focus({{ workspace = {} }})", lua_string(&id.to_string())))?;
+impl SessionState {
+    /// The workspaces to show again so every region of every split screen is back on its
+    /// remembered one, as workspace ids; already-shown ones are left out.
+    pub fn plan(&self, desktop: &crate::Desktop) -> Vec<i64> {
+        let mut ids = Vec::new();
+        for host in &desktop.hosts {
+            let Some(numbers) = self.active.get(&host.stable_id) else { continue };
+            for (region, number) in host.regions.iter().zip(numbers) {
+                let Some(m) = desktop.monitor(region) else { continue };
+                let id = desktop.workspace_id(region, *number);
+                if m.active_workspace != id {
+                    ids.push(id);
+                }
             }
         }
+        ids
+    }
+}
+
+/// Show each region's remembered workspace again, then give focus back.
+pub fn reapply_active(instance: &Instance, desktop: &crate::Desktop, state: &SessionState) -> Result<()> {
+    let plan = state.plan(desktop);
+    if plan.is_empty() {
+        return Ok(());
+    }
+    let focused = desktop.focused_monitor().map(|m| m.name.clone());
+    for id in plan {
+        dispatch(instance, &format!("hl.dsp.focus({{ workspace = {} }})", lua_string(&id.to_string())))?;
     }
     if let Some(name) = focused {
         dispatch(instance, &format!("hl.dsp.focus({{ monitor = {} }})", lua_string(&name)))?;
@@ -764,6 +780,10 @@ mod tests {
         right.name = "DP-3.v2".into();
         right.active_workspace = 204;
         d.monitors = vec![left, right];
+        d.regions.insert(
+            "DP-3.v2".into(),
+            crate::VirtualRegion { host: "DP-3".into(), index: 2, count: 2, workspace_base: 200, ..Default::default() },
+        );
         d.workspaces = vec![
             crate::Workspace {
                 id: 2,
@@ -786,5 +806,8 @@ mod tests {
         assert!(state.remember(&d));
         assert_eq!(state.active["S|O|H"], vec![2, 4]);
         assert!(!state.remember(&d), "nothing new");
+        assert!(state.plan(&d).is_empty(), "already showing what was remembered");
+        state.active.insert("S|O|H".into(), vec![2, 7]);
+        assert_eq!(state.plan(&d), vec![207]);
     }
 }
