@@ -199,7 +199,7 @@ impl Registry {
                 .find(|m| m.app.bus_name == *name)
                 .map(|m| m.app.path())
                 .unwrap_or_else(|| crate::spec::object_path(name));
-            describe(&bus, name, path, DESCRIBE_TIMEOUT)
+            describe(&bus, name, path, DESCRIBE_TIMEOUT, name)
         }))
         .await;
         live.apps = answers.into_iter().filter_map(Result::ok).collect();
@@ -258,7 +258,7 @@ impl Registry {
             Some(api) => api,
             // Not running: describing it starts it (D-Bus activation) and says which API it speaks.
             None => {
-                let started = describe(&bus, &app.bus_name, app.path(), START_TIMEOUT).await?;
+                let started = describe(&bus, &app.bus_name, app.path(), START_TIMEOUT, &app.name).await?;
                 let api = started.app.api;
                 let mut live = self.live.lock().await;
                 live.apps.retain(|d| d.app.bus_name != app.bus_name);
@@ -306,15 +306,16 @@ fn read_manifest(path: &Path) -> Result<Description, String> {
     Ok(d)
 }
 
-async fn describe(bus: &zbus::Connection, name: &str, path: String, timeout: Duration) -> Result<Description, Error> {
+/// `who`: the app's name, for errors.
+async fn describe(bus: &zbus::Connection, name: &str, path: String, timeout: Duration, who: &str) -> Result<Description, Error> {
     let call = bus.call_method(Some(name), path.as_str(), Some(INTERFACE), "Describe", &());
     let reply = tokio::time::timeout(timeout, call)
         .await
-        .map_err(|_| Error::new(ErrorKind::Timeout, format!("{name} didn't describe itself in time")))?
-        .map_err(|e| dbus_error(name, e))?;
+        .map_err(|_| Error::new(ErrorKind::Timeout, format!("{who} didn't start in time")))?
+        .map_err(|e| dbus_error(who, e))?;
     let text: String =
-        reply.body().deserialize().map_err(|e| Error::new(ErrorKind::Failed, format!("{name} answered oddly: {e}")))?;
-    let mut d = Description::parse(&text, Some(name)).map_err(|e| Error::new(ErrorKind::Failed, format!("{name}: {e}")))?;
+        reply.body().deserialize().map_err(|e| Error::new(ErrorKind::Failed, format!("{who} answered oddly: {e}")))?;
+    let mut d = Description::parse(&text, Some(name)).map_err(|e| Error::new(ErrorKind::Failed, format!("{who}: {e}")))?;
     // Calls go where it answered.
     d.app.bus_name = name.to_string();
     d.app.object_path = Some(path);
