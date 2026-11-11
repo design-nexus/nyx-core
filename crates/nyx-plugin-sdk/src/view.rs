@@ -279,6 +279,14 @@ pub fn header(title: &str) -> Node {
     markup(format!("<b>{}</b>", escape(title)))
 }
 
+/// A popover's footer, below a divider: a link at the left (a click sends `action`) and,
+/// optionally, something at the right ("Updates every 3 s"). The bar styles `pfoot`.
+pub fn footer(action: &str, link: &str, right: Option<Node>) -> Node {
+    let mut children = vec![button(action, Some(link), None).class("flat").class("link"), label("").expand()];
+    children.extend(right);
+    hbox(children).spacing(8).class("pfoot")
+}
+
 pub fn color(c: &str) -> Paint {
     Paint::Color(c.into())
 }

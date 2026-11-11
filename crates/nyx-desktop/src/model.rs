@@ -324,6 +324,26 @@ impl Desktop {
         Ok(())
     }
 
+    /// Read each monitor's reserved space again (a bar's layer surface mapping or going
+    /// changes it, and Hyprland sends no monitor event for that). Whether any changed.
+    pub fn refresh_reserved(&mut self, instance: &Instance) -> Result<bool> {
+        let monitors: Vec<RawMonitor> = instance.json("monitors all")?;
+        Ok(self.set_reserved(monitors))
+    }
+
+    fn set_reserved(&mut self, monitors: Vec<RawMonitor>) -> bool {
+        let mut changed = false;
+        for m in monitors.into_iter().map(Monitor::from) {
+            if let Some(cur) = self.monitors.iter_mut().find(|c| c.name == m.name)
+                && cur.reserved != m.reserved
+            {
+                cur.reserved = m.reserved;
+                changed = true;
+            }
+        }
+        changed
+    }
+
     /// Read windows and the focused window again.
     pub fn refresh_windows(&mut self, instance: &Instance) -> Result<()> {
         let clients: Vec<RawClient> = instance.json("clients")?;
@@ -872,6 +892,15 @@ mod tests {
         assert_eq!(d.windows[0].address, "55ef7100a730");
         assert_eq!(d.windows[0].stable_id, "18000369");
         assert_eq!(d.active_window.as_deref(), Some("55ef7100a730"));
+    }
+
+    #[test]
+    fn a_bar_mapping_changes_the_reserved_space() {
+        let mut d = desktop();
+        d.monitors[0].reserved = [0; 4];
+        assert!(d.set_reserved(serde_json::from_str(MONITORS).unwrap()), "the bar's 26 px, read late");
+        assert_eq!(d.monitor("eDP-2").unwrap().reserved, [0, 26, 0, 0]);
+        assert!(!d.set_reserved(serde_json::from_str(MONITORS).unwrap()), "the same again is no change");
     }
 
     #[test]

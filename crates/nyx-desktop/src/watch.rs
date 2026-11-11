@@ -115,7 +115,7 @@ fn read_events(instance: &Instance, stream: UnixStream, desktop: &mut Desktop, o
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     let mut changes = Changes::default();
-    let (mut need_windows, mut need_layout) = (false, false);
+    let (mut need_windows, mut need_layout, mut need_reserved) = (false, false, false);
     loop {
         line.clear();
         match reader.read_line(&mut line) {
@@ -126,12 +126,15 @@ fn read_events(instance: &Instance, stream: UnixStream, desktop: &mut Desktop, o
         changes.merge(desktop.apply(&event));
         need_windows |= event.needs_windows();
         need_layout |= event.needs_layout();
+        need_reserved |= matches!(event, Event::OpenLayer { .. } | Event::CloseLayer { .. });
         // More already read? Apply it before asking Hyprland for anything.
         if !reader.buffer().is_empty() {
             continue;
         }
         if need_layout && desktop.refresh_layout(instance).is_ok() {
             changes.merge(Changes { monitors: true, workspaces: true, active: true, ..Default::default() });
+        } else if need_reserved && desktop.refresh_reserved(instance).unwrap_or(false) {
+            changes.merge(Changes { monitors: true, ..Default::default() });
         }
         if (need_windows || need_layout) && desktop.refresh_windows(instance).is_ok() {
             changes.merge(Changes { windows: true, focus: true, ..Default::default() });
@@ -142,6 +145,7 @@ fn read_events(instance: &Instance, stream: UnixStream, desktop: &mut Desktop, o
         changes = Changes::default();
         need_windows = false;
         need_layout = false;
+        need_reserved = false;
     }
 }
 
@@ -254,10 +258,10 @@ mod tests {
         assert_eq!(u.desktop.windows.len(), 3);
         assert!(u.desktop.layer_open("nyx-control-center"));
 
-        // A panel hides: its layer closes, nothing else is read.
+        // A panel hides: its layer closes; the reserved space is read again, unchanged.
         events.write_all(b"closelayer>>nyx-control-center\n").unwrap();
         let u = next(&rx);
-        assert!(u.changes.layers && !u.changes.windows);
+        assert!(u.changes.layers && !u.changes.windows && !u.changes.monitors);
         assert!(!u.desktop.layer_open("nyx-control-center"));
 
         // Two events in one write arrive as one update.

@@ -365,6 +365,9 @@ pub struct MenuEntry {
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<bool>,
+    /// A short code drawn as a key cap before the label ("EN" for a keyboard layout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap: Option<String>,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

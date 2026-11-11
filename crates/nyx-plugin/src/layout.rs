@@ -17,12 +17,12 @@ center = [["nyx.clock"]]
 right = [
     "nyx.privacy",
     "nyx.recording",
+    "nyx.keyboard",
     ["nyx.media"],
     ["nyx.weather", "nyx.stats"],
-    "nyx.updates",
-    "nyx.keyboard",
-    "nyx.keepawake",
     "nyx.tray",
+    "nyx.updates",
+    "nyx.keepawake",
     ["nyx.system"],
     ["nyx.panels/notifications"],
 ]
@@ -334,8 +334,8 @@ mod tests {
         let mut doc = read_bar(Path::new("/nonexistent")).unwrap();
         bar_place(&mut doc, None, "acme.ping", "right", &Position::Before("nyx.stats".into()));
         let right = entries(&doc, "right");
-        assert_eq!(right[3], "acme.ping", "before the group holding nyx.stats: {right:?}");
-        assert_eq!(right[4], "[nyx.weather,nyx.stats]");
+        assert_eq!(right[4], "acme.ping", "before the group holding nyx.stats: {right:?}");
+        assert_eq!(right[5], "[nyx.weather,nyx.stats]");
         bar_place(&mut doc, None, "acme.ping", "left", &Position::End);
         assert!(!entries(&doc, "right").contains(&"acme.ping".to_string()));
         assert_eq!(entries(&doc, "left"), vec!["[nyx.launcher,nyx.workspaces]", "nyx.window", "acme.ping"]);
