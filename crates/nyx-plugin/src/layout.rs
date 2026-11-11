@@ -11,7 +11,7 @@ pub const DEFAULT_BAR: &str = r#"# Nyx Bar layout. Entries are plugins ("nyx.clo
 # ("nyx.system/volume"). Entries in brackets share one pill (["nyx.weather", "nyx.stats"]),
 # and "|" draws a thin divider. Which items show at all is chosen with
 # `nyx plugin configure`; enabled items this file doesn't place go to the section their
-# plugin asks for.
+# plugin asks for, where "*" stands (without one: nearer the middle).
 left = [["nyx.launcher", "nyx.workspaces"], "nyx.window"]
 center = [["nyx.clock"]]
 right = [
@@ -19,12 +19,14 @@ right = [
     "nyx.recording",
     "nyx.keyboard",
     ["nyx.media"],
+    "*",
     ["nyx.weather", "nyx.stats"],
     "nyx.tray",
     "nyx.updates",
     "nyx.keepawake",
     ["nyx.system"],
     ["nyx.panels/notifications"],
+    ["nyx.panels/control-center"],
 ]
 
 # Size: compact (28 px), default (32), cozy (36) or spacious (40).
@@ -334,8 +336,8 @@ mod tests {
         let mut doc = read_bar(Path::new("/nonexistent")).unwrap();
         bar_place(&mut doc, None, "acme.ping", "right", &Position::Before("nyx.stats".into()));
         let right = entries(&doc, "right");
-        assert_eq!(right[4], "acme.ping", "before the group holding nyx.stats: {right:?}");
-        assert_eq!(right[5], "[nyx.weather,nyx.stats]");
+        assert_eq!(right[5], "acme.ping", "before the group holding nyx.stats: {right:?}");
+        assert_eq!(right[6], "[nyx.weather,nyx.stats]");
         bar_place(&mut doc, None, "acme.ping", "left", &Position::End);
         assert!(!entries(&doc, "right").contains(&"acme.ping".to_string()));
         assert_eq!(entries(&doc, "left"), vec!["[nyx.launcher,nyx.workspaces]", "nyx.window", "acme.ping"]);
