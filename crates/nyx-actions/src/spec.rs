@@ -149,6 +149,10 @@ pub struct Action {
     pub sensitive: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub suggest: BTreeMap<String, String>,
+    /// A symbolic icon-theme name for the action (`media-playback-start-symbolic`), drawn
+    /// beside it in launchers; empty, they choose one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub icon: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<ResultKind>,
 }
@@ -224,6 +228,7 @@ impl Action {
         put("timeout_ms", json!(self.timeout_ms), self.timeout_ms.is_none());
         put("suggest", json!(self.suggest), self.suggest.is_empty());
         put("sensitive", json!(true), !self.sensitive);
+        put("icon", json!(self.icon), self.icon.is_empty());
         put("result", json!(self.result), self.result.is_none());
         let mut tool = json!({
             "name": self.id,
@@ -519,6 +524,14 @@ fn parse_tool(tool: &Value, strict: bool) -> Result<Action, String> {
         }
     }
     let timeout_ms: Option<u64> = get(x, "timeout_ms", strict)?;
+    let icon: String = get(x, "icon", strict)?.unwrap_or_default();
+    let icon = if icon.is_empty() || valid_icon(&icon) {
+        icon
+    } else if strict {
+        return Err(format!("icon {icon} isn't a symbolic icon name"));
+    } else {
+        String::new()
+    };
     Ok(Action {
         id,
         title,
@@ -535,8 +548,16 @@ fn parse_tool(tool: &Value, strict: bool) -> Result<Action, String> {
         timeout_ms: timeout_ms.map(|t| t.min(MAX_TIMEOUT_MS)),
         suggest: get(x, "suggest", strict)?.unwrap_or_default(),
         sensitive: get(x, "sensitive", strict)?.unwrap_or(false),
+        icon,
         result: get(x, "result", strict)?,
     })
+}
+
+/// An icon-theme name ending in `-symbolic`: lowercase letters, digits, `-` and `.`.
+fn valid_icon(name: &str) -> bool {
+    name.len() <= 96
+        && name.ends_with("-symbolic")
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-.".contains(c))
 }
 
 fn first_sentence(text: &str) -> &str {
@@ -578,7 +599,7 @@ mod tests {
         json!({
             "tools": [
                 {"name": "notes.search", "description": "Search notes. By words.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
-                 "x-nyx": {"risk": "read_only", "positional": ["query"]}},
+                 "x-nyx": {"risk": "read_only", "positional": ["query"], "icon": "edit-find-symbolic"}},
                 {"name": "notes.create", "description": "Create a note.", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}}},
                  "annotations": {"title": "Create a note"}, "x-nyx": {"risk": "writes", "aliases": ["new", {"word": "today", "arguments": {"title": "Today"}}], "positional": ["title"]}},
                 {"name": "notes.delete", "description": "Delete a note.", "x-nyx": {"risk": "destructive", "confirmation": "never"}}
@@ -616,6 +637,7 @@ mod tests {
         assert_eq!(d.actions[1].confirmation, Confirmation::Never);
         assert_eq!(d.actions[2].confirmation, Confirmation::Ask, "destructive always asks");
         assert_eq!(d.actions[1].aliases[1].arguments().unwrap()["title"], "Today");
+        assert_eq!((d.actions[0].icon.as_str(), d.actions[1].icon.as_str()), ("edit-find-symbolic", ""));
         let again = Description::from_value(&d.to_json(), None).unwrap();
         assert_eq!(again, d);
         // An API 1 reader of the same document sees the hints.
@@ -638,6 +660,8 @@ mod tests {
         assert!(bad(&|v| v["nyx"]["bus_name"] = json!("org.example.Notes")).contains("bus name"));
         assert!(bad(&|v| v["nyx"]["extra"] = json!(1)).contains("nyx"));
         assert!(bad(&|v| v["tools"][2]["description"] = json!(" ")).contains("description"));
+        assert!(bad(&|v| v["tools"][0]["x-nyx"]["icon"] = json!("weather-clear")).contains("icon"));
+        assert!(bad(&|v| v["tools"][0]["x-nyx"]["icon"] = json!("../x-symbolic")).contains("icon"));
     }
 
     #[test]

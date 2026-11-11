@@ -106,6 +106,7 @@ rest.
 | `x-nyx.timeout_ms` | no | Default 30 000, at most 300 000. |
 | `x-nyx.sensitive` | no | `true` for an action that reads private data (clipboard history): untrusted callers can't run it even though it's `read_only`. |
 | `x-nyx.suggest` | no | Argument name to the ID of a read-only action that suggests values for it (section 8). |
+| `x-nyx.icon` | no | A symbolic icon-theme name for the action (`media-playback-start-symbolic`), shown beside it in Glimpse; without one, launchers choose from the verb. |
 | `x-nyx.result` | no | How a frontend shows the result without app-specific code: `list`, `object`, `message` or `none` (section 9). |
 
 An action with no `x-nyx` and no annotations is `unknown` risk: treated as `writes`
