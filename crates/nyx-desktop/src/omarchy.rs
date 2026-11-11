@@ -6,6 +6,11 @@
 //! `omarchy-hyprland-workspace-layout-current` does, and changes the mode only through
 //! Omarchy's own command, so Omarchy stays the one that applies it.
 //!
+//! Without Omarchy (NyxOS) there is no toggle and no floating mode: the mode is
+//! Hyprland's own workspace rule, set with `hyprctl eval` and saved as that rule in
+//! `$XDG_STATE_HOME/nyx/workspace-modes/<id>.lua` for the Hyprland config to load at
+//! the next start; the same file says the mode (`-- mode = "scrolling"`).
+//!
 //! The folder changes when the mode does; watch it (`gio::FileMonitor` on
 //! [`layouts_dir`]) to stay current without polling.
 
@@ -61,13 +66,26 @@ impl Mode {
     }
 }
 
-/// `$XDG_STATE_HOME/omarchy/workspace-layouts`.
+const TOGGLE: &str = "omarchy-hyprland-workspace-layout-toggle";
+
+/// Whether Omarchy's workspace modes are here (its toggle, and the Lua helpers behind it).
+pub fn omarchy() -> bool {
+    std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|d| d.join(TOGGLE).is_file()))
+}
+
+/// The modes this desktop can set: floating needs Omarchy's helpers.
+pub fn modes() -> &'static [Mode] {
+    if omarchy() { &Mode::ALL } else { &[Mode::Tiling, Mode::Scrolling] }
+}
+
+/// `$XDG_STATE_HOME/omarchy/workspace-layouts`, or without Omarchy
+/// `$XDG_STATE_HOME/nyx/workspace-modes`.
 pub fn layouts_dir() -> PathBuf {
     let state = std::env::var_os("XDG_STATE_HOME")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"));
-    state.join("omarchy/workspace-layouts")
+    if omarchy() { state.join("omarchy/workspace-layouts") } else { state.join("nyx/workspace-modes") }
 }
 
 /// The mode of workspace `id`. `tiled_layout` is Hyprland's `tiledLayout` for it (from
@@ -112,7 +130,15 @@ fn default_from_hyprland() -> Option<String> {
 /// through `omarchy-hyprland-workspace-layout-toggle`. Omarchy only changes the active
 /// workspace; it also shows its own one-line toast for the change.
 pub fn cycle(back: bool) -> Result<()> {
-    let mut cmd = Command::new("omarchy-hyprland-workspace-layout-toggle");
+    if !omarchy() {
+        let (id, layout) = active_workspace()?;
+        let now = workspace_mode(id, &layout);
+        let modes = modes();
+        let at = modes.iter().position(|m| *m == now).unwrap_or(0);
+        let to = modes[if back { at + modes.len() - 1 } else { at + 1 } % modes.len()];
+        return set_workspace(id, to);
+    }
+    let mut cmd = Command::new(TOGGLE);
     if back {
         cmd.arg("back");
     }
@@ -131,10 +157,47 @@ pub fn steps(from: Mode, to: Mode) -> (usize, bool) {
 
 /// Set the active workspace's mode to `to`, one or two presses of Omarchy's toggle.
 pub fn set_active(from: Mode, to: Mode) -> Result<()> {
+    if !omarchy() {
+        return set_workspace(active_workspace()?.0, to);
+    }
     let (count, back) = steps(from, to);
     for _ in 0..count {
         cycle(back)?;
     }
+    Ok(())
+}
+
+/// The active workspace's id and Hyprland's `tiledLayout` for it.
+fn active_workspace() -> Result<(i64, String)> {
+    let out = Command::new("hyprctl").args(["activeworkspace", "-j"]).output().context("run hyprctl")?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).context("read hyprctl activeworkspace")?;
+    let id = v.get("id").and_then(serde_json::Value::as_i64).context("no active workspace")?;
+    Ok((id, v.get("tiledLayout").and_then(serde_json::Value::as_str).unwrap_or_default().to_string()))
+}
+
+/// The rule that gives workspace `id` the layout of `mode`, as the saved file holds it.
+fn rule_file(id: i64, mode: Mode) -> String {
+    format!("-- mode = \"{0}\"\nhl.workspace_rule({{ workspace = \"{id}\", layout = \"{0}\" }})\n", mode.as_str())
+}
+
+/// Without Omarchy: Hyprland's workspace rule for `id` now, and saved for the next start.
+fn set_workspace(id: i64, to: Mode) -> Result<()> {
+    if id < 1 {
+        bail!("a named workspace keeps its layout");
+    }
+    if !modes().contains(&to) {
+        bail!("{} workspaces need Omarchy", to.label());
+    }
+    let file = rule_file(id, to);
+    let rule = file.lines().nth(1).unwrap_or_default();
+    let out = Command::new("hyprctl").args(["eval", rule]).output().context("run hyprctl")?;
+    let reply = String::from_utf8_lossy(&out.stdout);
+    if !out.status.success() || reply.trim_start().starts_with("error") {
+        bail!("Hyprland didn't take the layout: {}", reply.trim());
+    }
+    let dir = layouts_dir();
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    std::fs::write(dir.join(format!("{id}.lua")), file).context("save the workspace mode")?;
     Ok(())
 }
 
@@ -172,6 +235,14 @@ mod tests {
         std::fs::write(d.join("2.lua"), "o.workspace_layout({ workspace = \"2\", layout = \"dwindle\" })\n").unwrap();
         std::fs::write(d.join("default.lua"), "-- empty\n").unwrap();
         assert_eq!(workspace_mode_in(&d, 2, "dwindle", || Some("scrolling".into())), Mode::Scrolling);
+    }
+
+    #[test]
+    fn the_saved_rule_says_its_mode() {
+        let d = dir("nyx");
+        std::fs::write(d.join("2.lua"), rule_file(2, Mode::Scrolling)).unwrap();
+        assert_eq!(workspace_mode_in(&d, 2, "dwindle", || None), Mode::Scrolling);
+        assert_eq!(rule_file(2, Mode::Scrolling).lines().nth(1), Some("hl.workspace_rule({ workspace = \"2\", layout = \"scrolling\" })"));
     }
 
     #[test]
