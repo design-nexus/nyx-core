@@ -92,6 +92,8 @@ pub trait NodeExt {
     fn spacing(self, s: i32) -> Node;
     fn hover(self, props: &[(&str, Value)]) -> Node;
     fn pressed(self, props: &[(&str, Value)]) -> Node;
+    /// Clickable: a click sends an `action` event with `control` set to this.
+    fn action(self, action: &str) -> Node;
 }
 
 fn map(props: &[(&str, Value)]) -> Map<String, Value> {
@@ -160,6 +162,10 @@ impl NodeExt for Node {
     }
     fn pressed(mut self, props: &[(&str, Value)]) -> Node {
         self.pressed = Some(map(props));
+        self
+    }
+    fn action(mut self, action: &str) -> Node {
+        self.action = Some(action.into());
         self
     }
 }

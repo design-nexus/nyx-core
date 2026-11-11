@@ -40,6 +40,11 @@ pub struct Node {
     /// The same while a button is held.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pressed: Option<Map<String, Value>>,
+    /// Makes any node clickable (a box holding a day of a calendar, a workspace's
+    /// number and icons): a click sends an `action` event with this as its `control`.
+    /// Buttons and rows have their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

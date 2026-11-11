@@ -8,24 +8,28 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, Table, Value, value};
 
 /// The bar's first layout, written when it first starts.
 pub const DEFAULT_BAR: &str = r#"# Nyx Bar layout. Entries are plugins ("nyx.clock") or one of their items
-# ("nyx.system/volume"). Which items show at all is chosen with `nyx plugin configure`;
-# enabled items this file doesn't place go to the section their plugin asks for.
-left = ["nyx.workspaces"]
-center = ["nyx.clock"]
+# ("nyx.system/volume"). Entries in brackets share one pill (["nyx.weather", "nyx.stats"]),
+# and "|" draws a thin divider. Which items show at all is chosen with
+# `nyx plugin configure`; enabled items this file doesn't place go to the section their
+# plugin asks for.
+left = [["nyx.launcher", "nyx.workspaces"], "nyx.window"]
+center = [["nyx.clock"]]
 right = [
+    "nyx.privacy",
+    "nyx.recording",
+    ["nyx.media"],
+    ["nyx.weather", "nyx.stats"],
+    "nyx.updates",
+    "nyx.keyboard",
+    "nyx.keepawake",
     "nyx.tray",
-    "nyx.media",
-    "nyx.weather",
-    "nyx.stats",
-    "nyx.system/network",
-    "nyx.system/bluetooth",
-    "nyx.system/volume",
-    "nyx.system/battery",
-    "nyx.panels/notifications",
-    "nyx.panels/control-center",
+    ["nyx.system"],
+    ["nyx.panels/notifications"],
 ]
 
-# Bar height in logical pixels.
+# Size: compact (28 px), default (32), cozy (36) or spacious (40).
+# size = "default"
+# Or an exact height in logical pixels, which wins over the size:
 # height = 32
 
 # The bar draws with GTK's cairo renderer, which uses far less memory. For the GPU one:
@@ -33,7 +37,7 @@ right = [
 
 # Settings for one plugin:
 # [plugins."nyx.clock"]
-# format = "%a %b %-d  %H:%M"
+# layout = "compact"
 
 # Limits for one plugin (third-party plugins get strict defaults):
 # [plugins."acme.ping".limits]
@@ -90,10 +94,32 @@ fn sections_table<'a>(doc: &'a mut DocumentMut, monitor: Option<&str>) -> &'a mu
     }
 }
 
+/// Take entries out of a section's array, inside pill groups too; a group left empty
+/// goes.
+fn retain_entries(arr: &mut Array, keep: impl Fn(&str) -> bool) {
+    for v in arr.iter_mut() {
+        if let Some(group) = v.as_array_mut() {
+            group.retain(|g| g.as_str().is_none_or(|e| keep(e)));
+        }
+    }
+    arr.retain(|v| match v {
+        Value::Array(group) => !group.is_empty(),
+        v => v.as_str().is_none_or(|e| keep(e)),
+    });
+}
+
+/// A section's entries, a group's in order.
+fn flat_entries(arr: &Array) -> impl Iterator<Item = &str> {
+    arr.iter().flat_map(|v| match v {
+        Value::Array(group) => group.iter().filter_map(|g| g.as_str()).collect::<Vec<_>>(),
+        v => v.as_str().into_iter().collect(),
+    })
+}
+
 fn strip(table: &mut Table, plugin_or_entry: &str) {
     for s in SECTIONS {
         if let Some(arr) = table.get_mut(s).and_then(|i| i.as_array_mut()) {
-            arr.retain(|v| !v.as_str().is_some_and(|e| entry_matches(e, plugin_or_entry)));
+            retain_entries(arr, |e| !entry_matches(e, plugin_or_entry));
         }
     }
 }
@@ -118,21 +144,30 @@ pub fn bar_unplace(doc: &mut DocumentMut, plugin_or_entry: &str) {
 }
 
 /// Put an entry in a section (of one monitor, or everywhere), moving it if it's
-/// already somewhere in that table.
+/// already somewhere in that table. It goes in on its own, beside a pill group rather
+/// than inside one.
 pub fn bar_place(doc: &mut DocumentMut, monitor: Option<&str>, entry: &str, section: &str, pos: &Position) {
     let table = sections_table(doc, monitor);
     for s in SECTIONS {
         if let Some(arr) = table.get_mut(s).and_then(|i| i.as_array_mut()) {
-            arr.retain(|v| v.as_str() != Some(entry));
+            retain_entries(arr, |e| e != entry);
         }
     }
     let arr = array_of(table, section);
-    let entries: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+    // Each top-level slot with the entries it holds (one, or a group's).
+    let slots: Vec<Vec<String>> = arr
+        .iter()
+        .map(|v| match v {
+            Value::Array(group) => group.iter().filter_map(|g| g.as_str().map(String::from)).collect(),
+            v => v.as_str().map(String::from).into_iter().collect(),
+        })
+        .collect();
+    let holds = |slot: &Vec<String>, e: &str| slot.iter().any(|x| entry_matches(x, e));
     let at = match pos {
-        Position::End => entries.len(),
-        Position::Index(i) => (*i).min(entries.len()),
-        Position::Before(e) => entries.iter().position(|x| entry_matches(x, e)).unwrap_or(entries.len()),
-        Position::After(e) => entries.iter().rposition(|x| entry_matches(x, e)).map_or(entries.len(), |i| i + 1),
+        Position::End => slots.len(),
+        Position::Index(i) => (*i).min(slots.len()),
+        Position::Before(e) => slots.iter().position(|x| holds(x, e)).unwrap_or(slots.len()),
+        Position::After(e) => slots.iter().rposition(|x| holds(x, e)).map_or(slots.len(), |i| i + 1),
     };
     arr.insert(at, entry);
     if arr.len() > 3 {
@@ -148,7 +183,7 @@ pub fn bar_place(doc: &mut DocumentMut, monitor: Option<&str>, entry: &str, sect
 pub fn bar_is_placed(doc: &DocumentMut, plugin_or_entry: &str) -> bool {
     let check = |t: &Table| {
         SECTIONS.iter().any(|s| {
-            t.get(s).and_then(|i| i.as_array()).is_some_and(|a| a.iter().any(|v| v.as_str().is_some_and(|e| entry_matches(e, plugin_or_entry))))
+            t.get(s).and_then(|i| i.as_array()).is_some_and(|a| flat_entries(a).any(|e| entry_matches(e, plugin_or_entry)))
         })
     };
     check(doc.as_table())
@@ -283,7 +318,15 @@ mod tests {
     use super::*;
 
     fn entries(doc: &DocumentMut, section: &str) -> Vec<String> {
-        doc[section].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()
+        doc[section]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| match v {
+                Value::Array(g) => format!("[{}]", g.iter().map(|x| x.as_str().unwrap()).collect::<Vec<_>>().join(",")),
+                v => v.as_str().unwrap().to_string(),
+            })
+            .collect()
     }
 
     #[test]
@@ -291,13 +334,13 @@ mod tests {
         let mut doc = read_bar(Path::new("/nonexistent")).unwrap();
         bar_place(&mut doc, None, "acme.ping", "right", &Position::Before("nyx.stats".into()));
         let right = entries(&doc, "right");
-        assert_eq!(right[3], "acme.ping");
-        assert_eq!(right[4], "nyx.stats");
+        assert_eq!(right[3], "acme.ping", "before the group holding nyx.stats: {right:?}");
+        assert_eq!(right[4], "[nyx.weather,nyx.stats]");
         bar_place(&mut doc, None, "acme.ping", "left", &Position::End);
         assert!(!entries(&doc, "right").contains(&"acme.ping".to_string()));
-        assert_eq!(entries(&doc, "left"), vec!["nyx.workspaces", "acme.ping"]);
+        assert_eq!(entries(&doc, "left"), vec!["[nyx.launcher,nyx.workspaces]", "nyx.window", "acme.ping"]);
         bar_place(&mut doc, None, "nyx.clock/date", "center", &Position::After("nyx.clock".into()));
-        assert_eq!(entries(&doc, "center"), vec!["nyx.clock", "nyx.clock/date"]);
+        assert_eq!(entries(&doc, "center"), vec!["[nyx.clock]", "nyx.clock/date"]);
         let text = doc.to_string();
         assert!(text.contains("# Nyx Bar layout"));
         let again: DocumentMut = text.parse().unwrap();
@@ -313,6 +356,18 @@ mod tests {
         assert!(bar_is_placed(&doc, "c"));
         bar_place(&mut doc, Some("DP-1"), "d", "right", &Position::Index(0));
         assert!(doc.to_string().contains("[monitors.\"DP-1\"]"));
+    }
+
+    #[test]
+    fn groups_lose_entries_and_go_when_empty() {
+        let mut doc: DocumentMut = "right = [[\"a\", \"b\"], [\"c\"], \"|\", \"d\"]\n".parse().unwrap();
+        assert!(bar_is_placed(&doc, "b"));
+        bar_unplace(&mut doc, "b");
+        bar_unplace(&mut doc, "c");
+        assert_eq!(entries(&doc, "right"), vec!["[a]", "|", "d"]);
+        assert!(!bar_is_placed(&doc, "c"));
+        bar_place(&mut doc, None, "a", "right", &Position::End);
+        assert_eq!(entries(&doc, "right"), vec!["|", "d", "a"], "a moves out of its group, which goes");
     }
 
     #[test]

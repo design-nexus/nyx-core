@@ -290,6 +290,11 @@ pub struct Item {
     pub visible: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub class: Vec<String>,
+    /// Drawn as open, as while its popover shows: for an item whose panel is another
+    /// program's (the bar's status icons while the Control Center is open). A bar group
+    /// holding it is drawn open too.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
     /// Commands the host runs on a click. Third-party plugins may only name commands
     /// from their manifest's `host_commands`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -458,7 +463,10 @@ mod tests {
         let mut item = Item::new("time");
         item.text = Some("12:00".into());
         item.on_click = Some(vec!["nyx-calendar".into()]);
+        round(&PluginMsg::Item(item.clone()));
+        item.open = true;
         round(&PluginMsg::Item(item));
+        assert!(!encode(&Item::new("x")).contains("open"), "closed items don't say so");
         round(&PluginMsg::Patch(Patch {
             item: "cpu".into(),
             monitor: None,
