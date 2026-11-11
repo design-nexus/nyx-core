@@ -23,7 +23,6 @@ right = [
     ["nyx.weather", "nyx.stats"],
     "nyx.tray",
     "nyx.updates",
-    "nyx.keepawake",
     ["nyx.system"],
     ["nyx.panels/notifications"],
     ["nyx.panels/control-center"],
