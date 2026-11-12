@@ -17,9 +17,11 @@ use std::path::{Path, PathBuf};
 pub const TRUSTED_DIRS_FILE: &str = "/etc/nyx/trusted-bin";
 
 /// The program name `exe` runs as, if it's one of the suite's: in `own_dir` or a
-/// folder listed in [`TRUSTED_DIRS_FILE`].
+/// folder listed in [`TRUSTED_DIRS_FILE`]. On NixOS `own_dir` counts only in the Nix
+/// store, which no user can write (a copy run from `~/.local/bin` trusts just the list).
 pub fn program(exe: &Path, own_dir: &Path) -> Option<String> {
-    program_in(exe, own_dir, &trusted_dirs(Path::new(TRUSTED_DIRS_FILE)))
+    let own = if Path::new("/etc/NIXOS").exists() && !own_dir.starts_with("/nix/store") { Path::new("/nonexistent") } else { own_dir };
+    program_in(exe, own, &trusted_dirs(Path::new(TRUSTED_DIRS_FILE)))
 }
 
 /// [`program`] with the system's folders given.
