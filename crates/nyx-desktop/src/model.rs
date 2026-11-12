@@ -27,8 +27,21 @@ pub fn user_number(id: i64, name: &str) -> Option<u32> {
     if is_user_workspace(id) {
         return Some(id as u32);
     }
+    if let Some(origin) = fullscreen_origin(name) {
+        let n = origin % 100;
+        return (is_user_workspace(origin) || (origin > 100 && USER_WORKSPACES.contains(&n))).then_some(n as u32);
+    }
     let n = id % 100;
     (id > 100 && USER_WORKSPACES.contains(&n) && name == n.to_string()).then_some(n as u32)
+}
+
+/// The workspace a fullscreen window came from: with `misc:fullscreen_own_workspace`
+/// (Nyx Hyprland) it goes to a workspace of its own named `fullscreen-<origin>-<n>`,
+/// which belongs to `<origin>` (an id; a named origin isn't a user workspace).
+pub fn fullscreen_origin(name: &str) -> Option<i64> {
+    let (origin, serial) = name.strip_prefix("fullscreen-")?.rsplit_once('-')?;
+    serial.parse::<u32>().ok()?;
+    origin.parse().ok()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -179,6 +192,12 @@ impl Workspace {
     /// The number the user sees (1 to 10), see [`user_number`].
     pub fn number(&self) -> Option<u32> {
         user_number(self.id, &self.name)
+    }
+
+    /// The id of the workspace this one stands for: a fullscreen window's own workspace
+    /// stands for the one it came from ([`fullscreen_origin`]), any other for itself.
+    pub fn home_id(&self) -> i64 {
+        fullscreen_origin(&self.name).unwrap_or(self.id)
     }
 
     pub fn is_special(&self) -> bool {
@@ -864,6 +883,20 @@ struct RawLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fullscreen_workspace_belongs_to_the_one_it_came_from() {
+        assert_eq!(fullscreen_origin("fullscreen-2-1"), Some(2));
+        assert_eq!(fullscreen_origin("fullscreen-203-4"), Some(203));
+        assert_eq!(fullscreen_origin("fullscreen-in-place"), None);
+        assert_eq!(fullscreen_origin("fullscreen-music-1"), None, "a named origin");
+        assert_eq!(user_number(-1340, "fullscreen-2-1"), Some(2));
+        assert_eq!(user_number(-1341, "fullscreen-203-1"), Some(3), "a virtual monitor's workspace 3");
+        assert_eq!(user_number(-1342, "fullscreen-music-1"), None);
+        assert_eq!(user_number(-1343, "fullscreen-42-1"), None);
+        let w = Workspace { id: -1340, name: "fullscreen-2-1".into(), monitor: "eDP-1".into(), windows: 1, has_fullscreen: true, tiled_layout: "dwindle".into() };
+        assert_eq!((w.home_id(), w.is_user()), (2, true));
+    }
 
     const MONITORS: &str = include_str!("../tests/data/monitors.json");
     const WORKSPACES: &str = include_str!("../tests/data/workspaces.json");
