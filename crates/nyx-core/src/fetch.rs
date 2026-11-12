@@ -49,35 +49,90 @@ pub fn check_url(url: &str) -> Result<()> {
     Ok(())
 }
 
+/// How long a clone may take, and how big the checkout may be: anyone can ask for a
+/// package from any repository.
+const CLONE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+const MAX_CHECKOUT_BYTES: u64 = 200 * 1024 * 1024;
+
 /// Run git with local and helper transports off and no prompts.
 pub fn git(dir: Option<&Path>, args: &[&str]) -> Result<String> {
+    git_within(dir, args, None)
+}
+
+/// `git`, killed after `timeout`. A download slower than 1 KB/s for 30 s stops too.
+fn git_within(dir: Option<&Path>, args: &[&str], timeout: Option<std::time::Duration>) -> Result<String> {
     let mut cmd = Command::new("git");
     if let Some(d) = dir {
         cmd.arg("-C").arg(d);
     }
     let file = if test_allows_file() { "always" } else { "never" };
     cmd.args(["-c", &format!("protocol.file.allow={file}"), "-c", "protocol.ext.allow=never", "-c", "advice.detachedHead=false"])
+        .args(["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_SSH_COMMAND", std::env::var("GIT_SSH_COMMAND").unwrap_or_else(|_| "ssh -oBatchMode=yes".into()));
-    let out = cmd.output().context("running git")?;
+        .env("GIT_SSH_COMMAND", std::env::var("GIT_SSH_COMMAND").unwrap_or_else(|_| "ssh -oBatchMode=yes".into()))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().context("running git")?;
+    if let Some(limit) = timeout {
+        let start = std::time::Instant::now();
+        while child.try_wait()?.is_none() {
+            if start.elapsed() > limit {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("git {} took longer than {} minutes", args.first().unwrap_or(&""), limit.as_secs() / 60);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    let out = child.wait_with_output().context("running git")?;
     if !out.status.success() {
         bail!("git {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+fn tree_size(dir: &Path) -> u64 {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => tree_size(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
 /// Clone `url` into `dest` and check out `git_ref` (a branch, tag or commit), then
-/// `pinned_commit` if given, which HEAD must then be. Returns the commit.
+/// `pinned_commit` if given, which HEAD must then be. Returns the commit. Only the
+/// branch or tag's newest commit is fetched when that's all that's needed.
 pub fn clone(url: &str, git_ref: Option<&str>, pinned_commit: Option<&str>, dest: &Path) -> Result<String> {
     check_url(url)?;
+    if git_ref.is_some_and(|r| r.starts_with('-')) {
+        bail!("{:?} isn't a branch, tag or commit", git_ref.unwrap_or_default());
+    }
     let dest_s = dest.to_string_lossy().to_string();
-    git(None, &["clone", "--quiet", "--", url, &dest_s])?;
-    if let Some(r) = git_ref {
-        if r.starts_with('-') {
-            bail!("{r:?} isn't a branch, tag or commit");
+    let shallow = pinned_commit.is_none() && {
+        let mut args = vec!["clone", "--quiet", "--depth", "1", "--single-branch"];
+        if let Some(r) = git_ref {
+            args.extend(["--branch", r]);
         }
-        git(Some(dest), &["checkout", "--quiet", r, "--"])?;
+        args.extend(["--", url, &dest_s]);
+        git_within(None, &args, Some(CLONE_TIMEOUT)).is_ok()
+    };
+    if !shallow {
+        // A commit for a ref, or a pinned commit: the whole history.
+        let _ = std::fs::remove_dir_all(dest);
+        git_within(None, &["clone", "--quiet", "--", url, &dest_s], Some(CLONE_TIMEOUT))?;
+        if let Some(r) = git_ref {
+            git(Some(dest), &["checkout", "--quiet", r, "--"])?;
+        }
+    }
+    if tree_size(dest) > MAX_CHECKOUT_BYTES {
+        bail!("the repository is bigger than {} MB", MAX_CHECKOUT_BYTES / 1024 / 1024);
     }
     if let Some(c) = pinned_commit {
         git(Some(dest), &["checkout", "--quiet", c, "--"]).with_context(|| format!("the repository has no commit {c}"))?;
