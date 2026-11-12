@@ -2,7 +2,7 @@
 //! `nyx apps …` and `nyx APP …`; programs use `call`.
 
 use nyx_actions::resolve::{self, Resolution};
-use nyx_actions::{Action, Catalog, Entry, Error, ErrorKind, InvokeOptions, Listed, Options, Registry, ResultKind, State};
+use nyx_actions::{Action, Catalog, Entry, Error, ErrorKind, InvokeOptions, Listed, Options, Registry, ResultKind, Risk, State};
 use serde_json::{Map, Value, json};
 use std::io::{BufRead, Write};
 
@@ -18,8 +18,9 @@ nyx-actions complete [WORDS…]                completions for the last word
 nyx-actions completion bash|zsh|fish [WORD…] a completion script for nyx (WORDs: nyx's own
                                              commands)
 
---yes: you agree to an action that asks first. Without it, nyx asks on a terminal and
-refuses otherwise. --json: print {\"ok\": …} or {\"error\": {\"kind\", \"message\"}}.";
+--yes: you agree to an action that asks first. Without it, nyx asks on a terminal.
+Actions that change things or read private data run only from a terminal: a script
+can't use nyx to act as you. --json: print {\"ok\": …} or {\"error\": {\"kind\", \"message\"}}.";
 
 struct Flags {
     json: bool,
@@ -244,8 +245,9 @@ async fn run_words(registry: &Registry, words: &[String], flags: &Flags) -> Resu
         ));
     }
     let arguments = Value::Object(c.arguments);
+    from_terminal(&l.action)?;
     let confirmed = confirm(e, &l.action, &arguments, flags)?;
-    let options = InvokeOptions { confirmed, trusted: true, on_behalf_of: None, frontend: "cli".into() };
+    let options = InvokeOptions { confirmed, trusted: on_terminal(), on_behalf_of: None, frontend: "cli".into() };
     let result = registry.invoke(&c.action, arguments, &options).await?;
     if flags.json {
         println!("{}", json!({"ok": result}));
@@ -264,13 +266,32 @@ async fn call(registry: &Registry, args: &[String], flags: &Flags) -> Result<(),
     };
     let catalog = registry.catalog().await;
     let confirmed = match catalog.find(id) {
-        Some((e, l)) => confirm(e, &l.action, &arguments, flags)?,
+        Some((e, l)) => {
+            from_terminal(&l.action)?;
+            confirm(e, &l.action, &arguments, flags)?
+        }
         None => flags.yes,
     };
-    let options = InvokeOptions { confirmed, trusted: true, on_behalf_of: None, frontend: "cli".into() };
+    // Apps trust nyx-actions as a Nyx program, so it vouches only for a person at a terminal.
+    let options = InvokeOptions { confirmed, trusted: on_terminal(), on_behalf_of: None, frontend: "cli".into() };
     let result = registry.invoke(id, arguments, &options).await?;
     println!("{}", json!({"ok": result}));
     Ok(())
+}
+
+fn on_terminal() -> bool {
+    // SAFETY: isatty only reads the descriptor's state.
+    unsafe { libc::isatty(0) == 1 && libc::isatty(2) == 1 }
+}
+
+/// Apps trust this program, so another program can't use it to change things or read
+/// private data: those actions run only for a person at a terminal.
+fn from_terminal(a: &Action) -> Result<(), Error> {
+    if (a.risk == Risk::ReadOnly && !a.sensitive) || on_terminal() {
+        return Ok(());
+    }
+    let what = if a.risk == Risk::ReadOnly { "reads private data".to_string() } else { a.risk.label().to_string() };
+    Err(Error::new(ErrorKind::PermissionDenied, format!("{} {what}; nyx runs it only from a terminal", a.id)))
 }
 
 /// Whether the person agreed: `--yes`, or a yes on a terminal.
@@ -278,9 +299,7 @@ fn confirm(e: &Entry, a: &Action, arguments: &Value, flags: &Flags) -> Result<bo
     if !a.asks() || flags.yes {
         return Ok(flags.yes);
     }
-    // SAFETY: isatty only reads the descriptor's state.
-    let terminal = unsafe { libc::isatty(0) == 1 && libc::isatty(2) == 1 };
-    if !terminal || flags.json {
+    if !on_terminal() || flags.json {
         return Err(Error::new(
             ErrorKind::ConfirmationRequired,
             format!("{} {}; run it again with --yes to go ahead", a.id, a.risk.label()),
