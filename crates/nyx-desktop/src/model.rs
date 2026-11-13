@@ -35,6 +35,24 @@ pub fn user_number(id: i64, name: &str) -> Option<u32> {
     (id > 100 && USER_WORKSPACES.contains(&n) && name == n.to_string()).then_some(n as u32)
 }
 
+/// A workspace's id. Hyprland 0.57 gives named workspaces (a fullscreen window's own,
+/// `fullscreen-2-1`) no number: in its JSON they have no `id`, and its events name them
+/// where the number was. They get a stable id of their own from the name, the same in
+/// every process, below any id Hyprland uses.
+pub fn workspace_id(field: &str, name: &str) -> i64 {
+    if let Ok(id) = field.trim().parse::<i64>()
+        && id != 0
+    {
+        return id;
+    }
+    let name = if name.is_empty() { field } else { name };
+    if name.is_empty() {
+        return 0;
+    }
+    let hash = name.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    -1_000_000_000 - (hash % 1_000_000_000) as i64
+}
+
 /// The workspace a fullscreen window came from: with `misc:fullscreen_own_workspace`
 /// (Nyx Hyprland) it goes to a workspace of its own named `fullscreen-<origin>-<n>`,
 /// which belongs to `<origin>` (an id; a named origin isn't a user workspace).
@@ -425,7 +443,7 @@ impl Desktop {
             }
             Event::OpenWindow { address, class, title, workspace } => {
                 if self.window(address).is_none() {
-                    let ws = self.workspaces.iter().find(|w| &w.name == workspace).map_or(0, |w| w.id);
+                    let ws = self.workspaces.iter().find(|w| &w.name == workspace).map_or_else(|| workspace_id(workspace, workspace), |w| w.id);
                     for w in &mut self.windows {
                         w.focus_order += 1;
                     }
@@ -781,7 +799,7 @@ impl From<RawMonitor> for Monitor {
             refresh_rate: r.refresh_rate,
             focused: r.focused,
             disabled: r.disabled,
-            active_workspace: r.active_workspace.id,
+            active_workspace: workspace_id(&r.active_workspace.id.to_string(), &r.active_workspace.name),
             special_workspace: (r.special_workspace.id != 0).then_some(r.special_workspace.id),
             reserved,
         }
@@ -803,7 +821,7 @@ struct RawWorkspace {
 impl From<RawWorkspace> for Workspace {
     fn from(r: RawWorkspace) -> Self {
         Workspace {
-            id: r.id,
+            id: workspace_id(&r.id.to_string(), &r.name),
             name: r.name,
             monitor: r.monitor,
             windows: r.windows,
@@ -846,7 +864,7 @@ impl From<RawClient> for Window {
             class: r.class,
             initial_class: r.initial_class,
             title: r.title,
-            workspace: r.workspace.id,
+            workspace: workspace_id(&r.workspace.id.to_string(), &r.workspace.name),
             monitor: r.monitor,
             floating: r.floating,
             fullscreen: r.fullscreen,
@@ -883,6 +901,21 @@ struct RawLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_workspaces_without_an_id_get_one_from_their_name() {
+        // Hyprland 0.57: no "id" in the JSON, the name where the number was in events.
+        let id = workspace_id("0", "fullscreen-2-1");
+        assert!((-2_000_000_000..=-1_000_000_000).contains(&id));
+        assert_eq!(id, workspace_id("fullscreen-2-1", "fullscreen-2-1"), "the JSON's and the event's agree");
+        assert_ne!(id, workspace_id("0", "fullscreen-2-2"));
+        assert_eq!(workspace_id("3", "3"), 3);
+        assert_eq!(crate::event::Event::parse("workspacev2>>fullscreen-2-1,fullscreen-2-1"), crate::event::Event::Workspace { id, name: "fullscreen-2-1".into() });
+        let w: Workspace = serde_json::from_str::<RawWorkspace>(r#"{"name":"fullscreen-2-1","monitor":"eDP-1","windows":1,"hasfullscreen":true}"#).unwrap().into();
+        assert_eq!((w.id, w.home_id(), w.number()), (id, 2, Some(2)));
+        let c: Window = serde_json::from_str::<RawClient>(r#"{"address":"0xabc","workspace":{"name":"fullscreen-2-1"}}"#).unwrap().into();
+        assert_eq!(c.workspace, id);
+    }
 
     #[test]
     fn a_fullscreen_workspace_belongs_to_the_one_it_came_from() {

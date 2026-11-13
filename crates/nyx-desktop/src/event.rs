@@ -5,6 +5,8 @@
 //! Window addresses arrive without `0x` here but with it in `j/clients`; both are kept
 //! without it (see [`address`]).
 
+use crate::model::workspace_id;
+
 /// One event, with the fields the desktop apps use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -76,11 +78,11 @@ impl Event {
         Some(match name {
             "workspacev2" => {
                 let v = f(2);
-                Event::Workspace { id: v.first()?.parse().ok()?, name: v.get(1)?.clone() }
+                Event::Workspace { id: workspace_id(v.first()?, v.get(1)?), name: v.get(1)?.clone() }
             }
             "focusedmonv2" => {
                 let v = f(2);
-                Event::FocusedMonitor { monitor: v.first()?.clone(), workspace: v.get(1)?.parse().ok()? }
+                Event::FocusedMonitor { monitor: v.first()?.clone(), workspace: workspace_id(v.get(1)?, v.get(1)?) }
             }
             "activewindowv2" => {
                 Event::ActiveWindow { address: (!data.is_empty() && data != "0x0" && data != "0").then(|| address(data)) }
@@ -97,7 +99,7 @@ impl Event {
             "closewindow" => Event::CloseWindow { address: address(data) },
             "movewindowv2" => {
                 let v = f(3);
-                Event::MoveWindow { address: address(v.first()?), workspace: v.get(1)?.parse().ok()? }
+                Event::MoveWindow { address: address(v.first()?), workspace: workspace_id(v.get(1)?, v.get(2).map_or("", String::as_str)) }
             }
             "windowtitlev2" => {
                 let v = f(2);
@@ -111,15 +113,15 @@ impl Event {
             "urgent" => Event::Urgent { address: address(data) },
             "createworkspacev2" => {
                 let v = f(2);
-                Event::CreateWorkspace { id: v.first()?.parse().ok()?, name: v.get(1)?.clone() }
+                Event::CreateWorkspace { id: workspace_id(v.first()?, v.get(1)?), name: v.get(1)?.clone() }
             }
             "destroyworkspacev2" => {
                 let v = f(2);
-                Event::DestroyWorkspace { id: v.first()?.parse().ok()?, name: v.get(1)?.clone() }
+                Event::DestroyWorkspace { id: workspace_id(v.first()?, v.get(1)?), name: v.get(1)?.clone() }
             }
             "moveworkspacev2" => {
                 let v = f(3);
-                Event::MoveWorkspace { id: v.first()?.parse().ok()?, monitor: v.get(2)?.clone() }
+                Event::MoveWorkspace { id: workspace_id(v.first()?, v.get(1)?), monitor: v.get(2)?.clone() }
             }
             "renameworkspace" => {
                 let v = f(2);
@@ -242,7 +244,7 @@ mod tests {
         assert_eq!(Event::parse("activewindowv2>>"), Event::ActiveWindow { address: None });
         assert_eq!(Event::parse("activewindowv2>>0x0"), Event::ActiveWindow { address: None });
         assert!(matches!(Event::parse("workspace>>3"), Event::Other { .. }));
-        assert!(matches!(Event::parse("workspacev2>>notanumber,x"), Event::Other { .. }));
+        assert!(matches!(Event::parse("workspacev2>>notanumber,x"), Event::Workspace { id, .. } if id < 0), "a named workspace");
         assert!(matches!(Event::parse("garbage"), Event::Other { .. }));
     }
 
