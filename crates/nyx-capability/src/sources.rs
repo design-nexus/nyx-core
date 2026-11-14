@@ -3,6 +3,7 @@
 use crate::Source;
 use notify::{RecursiveMode, Watcher};
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
@@ -171,6 +172,29 @@ fn udev_events(routes: Vec<Route<String>>, tx: Sender<usize>) {
     });
 }
 
+/// A watcher command that ends with the thread running it, so with the app: `pactl
+/// subscribe` and `nmcli monitor` ignore the closed pipe and would otherwise outlive it,
+/// and enough left-over `pactl` clients fill PipeWire's and lock new apps out of sound.
+fn watcher(program: &str, args: &[String]) -> Command {
+    let mut c = Command::new(program);
+    c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let parent = std::process::id() as libc::pid_t;
+    // SAFETY: only async-signal-safe calls between fork and exec.
+    unsafe {
+        c.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // The app may have gone between the fork and the prctl.
+            if libc::getppid() != parent {
+                libc::_exit(0);
+            }
+            Ok(())
+        });
+    }
+    c
+}
+
 /// Run `cmd` for ever, handing each line to `f` and calling `ended` when it stops; start
 /// it again after a delay. A program that isn't installed is given up on.
 fn run_lines(cmd: &[String], mut f: impl FnMut(&str), ended: impl Fn()) {
@@ -178,7 +202,7 @@ fn run_lines(cmd: &[String], mut f: impl FnMut(&str), ended: impl Fn()) {
     let mut delay = RESTART;
     loop {
         let started = std::time::Instant::now();
-        match Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() {
+        match watcher(program, args).spawn() {
             Ok(mut child) => {
                 if let Some(out) = child.stdout.take() {
                     for line in BufReader::new(out).lines().map_while(Result::ok) {
@@ -216,6 +240,16 @@ mod tests {
         std::fs::create_dir(&later).unwrap();
         let got: Vec<usize> = std::iter::from_fn(|| rx.recv_timeout(Duration::from_millis(500)).ok()).collect();
         assert!(got.contains(&2), "a folder appearing counts: {got:?}");
+    }
+
+    #[test]
+    fn a_watcher_ends_with_the_thread_that_started_it() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut child = std::thread::spawn(|| watcher("sleep", &["30".into()]).spawn().unwrap()).join().unwrap();
+        let started = std::time::Instant::now();
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

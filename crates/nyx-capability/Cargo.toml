@@ -11,6 +11,7 @@ repository.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 notify = { version = "8", default-features = false }
+libc = "0.2"
 async-channel = { version = "2", optional = true }
 glib = { version = "0.22", optional = true }
 
