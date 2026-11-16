@@ -128,18 +128,33 @@ pub fn show_in_folder(path: &Path) {
 }
 
 /// Write a file atomically: a temp file in the same directory, synced, then
-/// renamed over the target. Follows symlinks and keeps the file's permissions.
+/// renamed over the target. Follows symlinks and keeps the file's permissions, and its
+/// owner and group where allowed. A file that may be written in a folder that may not
+/// (no temporary file can be made beside it) is written in place instead.
 pub fn atomic_write(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
     use std::io::Write;
+    use std::os::unix::fs::MetadataExt;
     let path = &std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let dir = path.parent().context("path has no parent")?;
     std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".{}.tmp-{}", path.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+    let old = std::fs::metadata(path).ok();
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let tmp = dir.join(format!(".{}.tmp-{}-{nonce:x}", path.file_name().unwrap_or_default().to_string_lossy(), std::process::id()));
+    // create_new: never an existing file, nor a link someone left at that name.
+    let file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && old.as_ref().is_some_and(|m| m.is_file()) => {
+            return write_in_place(path, contents.as_ref());
+        }
+        Err(e) => return Err(e).with_context(|| format!("could not write {}", path.display())),
+    };
     let written = (|| -> Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut f = file;
         f.write_all(contents.as_ref())?;
-        if let Ok(meta) = std::fs::metadata(path) {
+        if let Some(meta) = &old {
             f.set_permissions(meta.permissions())?;
+            // Someone else's file (a shared folder) stays theirs where that's allowed.
+            let _ = std::os::unix::fs::fchown(&f, Some(meta.uid()), Some(meta.gid()));
         }
         f.sync_all()?;
         std::fs::rename(&tmp, path)?;
@@ -155,6 +170,19 @@ pub fn atomic_write(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
     Ok(())
 }
 
+/// Overwrite `path` itself (not atomic: a crash part way leaves it cut short).
+fn write_in_place(path: &Path, contents: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .with_context(|| format!("could not write {}", path.display()))?;
+    f.write_all(contents)?;
+    f.sync_all()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,6 +193,21 @@ mod tests {
         assert_eq!(shell_quote("tokyo-night"), "'tokyo-night'");
         assert_eq!(shell_quote("a b"), "'a b'");
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn writes_in_place_when_the_folder_is_read_only() {
+        let dir = std::env::temp_dir().join(format!("nyx-core-ro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("f.txt");
+        std::fs::write(&file, "one").unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = atomic_write(&file, "two");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        result.unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
