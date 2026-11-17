@@ -100,12 +100,12 @@ fn sections_table<'a>(doc: &'a mut DocumentMut, monitor: Option<&str>) -> &'a mu
 fn retain_entries(arr: &mut Array, keep: impl Fn(&str) -> bool) {
     for v in arr.iter_mut() {
         if let Some(group) = v.as_array_mut() {
-            group.retain(|g| g.as_str().is_none_or(|e| keep(e)));
+            group.retain(|g| g.as_str().is_none_or(&keep));
         }
     }
     arr.retain(|v| match v {
         Value::Array(group) => !group.is_empty(),
-        v => v.as_str().is_none_or(|e| keep(e)),
+        v => v.as_str().is_none_or(&keep),
     });
 }
 
