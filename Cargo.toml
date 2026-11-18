@@ -25,6 +25,7 @@ members = [
   "crates/nyx-devices",
   "crates/nyx-connect",
   "crates/nyx-actions",
+  "crates/nyx-platform",
 ]
 
 [workspace.package]
