@@ -13,7 +13,7 @@ sync = ["dep:age", "dep:reqwest", "dep:serde", "dep:serde_json", "dep:url", "dep
 testutil = ["sync"]
 
 [dependencies]
-age = { version = "0.11", optional = true }
+age = { version = "0.12", optional = true }
 anyhow = "1.0.104"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
 serde = { version = "1.0.229", features = ["derive"], optional = true }
