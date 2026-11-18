@@ -5,6 +5,7 @@ mod desktop;
 mod dns;
 mod input;
 mod net;
+mod power;
 mod speed;
 mod tailscale;
 
@@ -56,6 +57,16 @@ pub fn main(args: Vec<String>) -> i32 {
         "battery-present" => input::battery_present(),
         "hyprland-monitor-focused" => input::monitor_focused(),
         "restart-hyprsunset" => input::restart_hyprsunset(),
+        "hw-display" => power::hw_display(),
+        "brightness-display" => power::brightness(&rest),
+        "toggle-idle" => power::idle(&rest),
+        "toggle-nightlight" => power::nightlight(&rest),
+        "toggle-notification-silencing" => power::silence(),
+        "powerprofiles-set" => power::power_profile(&rest),
+        "battery-status" => power::battery(&rest),
+        "hyprland-monitor-internal" => power::internal(&rest),
+        "hyprland-monitor-scaling" => power::scaling(&rest),
+        "restart-audio" => power::restart_audio(),
         _ => {
             eprintln!("nyx-platform: no job called {job} (nyx-platform jobs lists them)");
             return 127;

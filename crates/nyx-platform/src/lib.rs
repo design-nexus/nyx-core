@@ -28,6 +28,16 @@ pub const JOBS: &[&str] = &[
     "battery-present",
     "hyprland-monitor-focused",
     "restart-hyprsunset",
+    "hw-display",
+    "brightness-display",
+    "toggle-idle",
+    "toggle-nightlight",
+    "toggle-notification-silencing",
+    "powerprofiles-set",
+    "battery-status",
+    "hyprland-monitor-internal",
+    "hyprland-monitor-scaling",
+    "restart-audio",
 ];
 
 /// The program on `PATH` called `name`.
