@@ -62,6 +62,31 @@ pub fn job_for_script(script: &str) -> Option<&'static str> {
     JOBS.iter().copied().find(|j| *j == job)
 }
 
+/// `args` to run here: an `omarchy-JOB …` command becomes `nyx-platform JOB …` where the
+/// script isn't installed and `nyx-platform` does that job. Anything else is unchanged,
+/// so an app's command helper can pass every command through this.
+pub fn resolve(args: &[&str]) -> Vec<String> {
+    if let Some((program, rest)) = args.split_first()
+        && let Some(job) = job_for_script(program)
+        && find(program).is_none()
+        && find("nyx-platform").is_some()
+    {
+        let mut v = vec!["nyx-platform".to_string(), job.to_string()];
+        v.extend(rest.iter().map(|a| a.to_string()));
+        return v;
+    }
+    args.iter().map(|a| a.to_string()).collect()
+}
+
+/// Whether `program` runs here: on `PATH` (or, given a path, it exists), or an
+/// `omarchy-JOB` script `nyx-platform` stands in for.
+pub fn present(program: &str) -> bool {
+    if program.contains('/') {
+        return Path::new(program).exists();
+    }
+    find(program).is_some() || (job_for_script(program).is_some() && find("nyx-platform").is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +97,13 @@ mod tests {
         assert_eq!(job_for_script("omarchy-dns"), Some("dns"));
         assert_eq!(job_for_script("omarchy-theme-set"), None);
         assert_eq!(job_for_script("network-band"), None);
+    }
+
+    #[test]
+    fn other_commands_pass_through() {
+        assert_eq!(resolve(&["nmcli", "radio"]), ["nmcli", "radio"]);
+        assert_eq!(resolve(&["omarchy-theme-set", "x"]), ["omarchy-theme-set", "x"]);
+        assert!(resolve(&[]).is_empty());
     }
 
     #[test]
