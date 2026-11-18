@@ -8,13 +8,14 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde_json = { version = "1", optional = true }
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"], optional = true }
 
 [features]
 # Without `cli`: which command does a job here (what apps need). `cli` adds the
 # `nyx-platform` command, NyxOS's implementation of the jobs.
 default = []
-cli = ["dep:zbus"]
+cli = ["dep:zbus", "dep:serde_json"]
 
 [[bin]]
 name = "nyx-platform"

@@ -3,6 +3,7 @@
 
 mod desktop;
 mod dns;
+mod input;
 mod net;
 mod speed;
 mod tailscale;
@@ -48,6 +49,13 @@ pub fn main(args: Vec<String>) -> i32 {
         "dns" => dns::run_dns(&rest),
         "tailscale-send" => tailscale::send(&rest),
         "tailscale-receive" => tailscale::receive(&rest),
+        "hw-touchpad" => input::hw("touchpad"),
+        "hw-touchscreen" => input::hw("touchscreen"),
+        "toggle-touchpad" => input::toggle("touchpad", &rest),
+        "toggle-touchscreen" => input::toggle("touchscreen", &rest),
+        "battery-present" => input::battery_present(),
+        "hyprland-monitor-focused" => input::monitor_focused(),
+        "restart-hyprsunset" => input::restart_hyprsunset(),
         _ => {
             eprintln!("nyx-platform: no job called {job} (nyx-platform jobs lists them)");
             return 127;
@@ -60,7 +68,9 @@ pub fn main(args: Vec<String>) -> i32 {
             2
         }
         Err(Fail::Error(e)) => {
-            eprintln!("Error: {e}");
+            if !e.is_empty() {
+                eprintln!("Error: {e}");
+            }
             1
         }
     }

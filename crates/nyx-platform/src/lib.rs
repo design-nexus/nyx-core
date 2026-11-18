@@ -21,6 +21,13 @@ pub const JOBS: &[&str] = &[
     "dns",
     "tailscale-send",
     "tailscale-receive",
+    "hw-touchpad",
+    "hw-touchscreen",
+    "toggle-touchpad",
+    "toggle-touchscreen",
+    "battery-present",
+    "hyprland-monitor-focused",
+    "restart-hyprsunset",
 ];
 
 /// The program on `PATH` called `name`.
@@ -41,7 +48,7 @@ pub fn command(job: &str) -> Option<Vec<String>> {
     if find(&script).is_some() {
         return Some(vec![script]);
     }
-    (JOBS.contains(&job) && find("nyx-platform").is_some()).then(|| vec!["nyx-platform".into(), job.into()])
+    (find("nyx-platform").is_some() && installed_jobs().iter().any(|j| j == job)).then(|| vec!["nyx-platform".into(), job.into()])
 }
 
 /// `job`'s command followed by `args`.
@@ -56,10 +63,25 @@ pub fn available(job: &str) -> bool {
     command(job).is_some()
 }
 
+/// The jobs the installed `nyx-platform` does: its `share/nyx-platform/jobs` (one a line,
+/// written when it's built), so an app built before a job was added still finds it;
+/// else [`JOBS`]. Read once.
+pub fn installed_jobs() -> &'static [String] {
+    static JOBS_HERE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    JOBS_HERE.get_or_init(|| {
+        find("nyx-platform")
+            .and_then(|bin| std::fs::canonicalize(bin).ok())
+            .and_then(|bin| bin.parent()?.parent().map(|prefix| prefix.join("share/nyx-platform/jobs")))
+            .and_then(|list| std::fs::read_to_string(list).ok())
+            .map(|text| text.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
+            .unwrap_or_else(|| JOBS.iter().map(|j| j.to_string()).collect())
+    })
+}
+
 /// The job an `omarchy-JOB` script name stands for, when `nyx-platform` does it.
-pub fn job_for_script(script: &str) -> Option<&'static str> {
+pub fn job_for_script(script: &str) -> Option<&str> {
     let job = script.strip_prefix("omarchy-")?;
-    JOBS.iter().copied().find(|j| *j == job)
+    installed_jobs().iter().any(|j| j == job).then_some(job)
 }
 
 /// `args` to run here: an `omarchy-JOB …` command becomes `nyx-platform JOB …` where the
